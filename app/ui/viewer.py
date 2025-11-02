@@ -40,9 +40,12 @@ def encode_csv_b64(mask: np.ndarray) -> str:
 def upload_tiles_batch(base_name: str,
                        tiles_rgb: List[np.ndarray],
                        masks: List[np.ndarray],
-                       subfolder: str | None = None):
+                       subfolder: str | None = None,
+                       orig_indices: List[int] | None = None):
     """
     Sends tiles in batches; no local files created.
+    If orig_indices is provided, it is used for naming and the "i" field to
+    preserve the original tile indices from the source image grid.
     Returns list of {i, pngId, csvId} for all tiles.
     """
     assert len(tiles_rgb) == len(masks)
@@ -50,13 +53,14 @@ def upload_tiles_batch(base_name: str,
 
     items = []
     for i in range(batch_size):
+        i_orig = orig_indices[i] if orig_indices is not None else i
         items.append({
-            "i": i,
+            "i": i_orig,
             "png_b64": encode_png_b64(tiles_rgb[i]),
             "csv_b64": encode_csv_b64(masks[i]),
             # optional custom names:
-            "png_name": f"{base_name}_tile_{i:04d}.png",
-            "csv_name": f"{base_name}_tile_{i:04d}.csv",
+            "png_name": f"{base_name}_tile_{i_orig:04d}.png",
+            "csv_name": f"{base_name}_tile_{i_orig:04d}.csv",
         })
 
     payload = {
@@ -189,11 +193,20 @@ class MainWindow(QtWidgets.QWidget):
             return
         try:
             self._busy(True)
-            # requests.post(self.web_app_url, json={"action": "done", "fileId": self.current["fileId"]}, timeout=30)
+            # Determine which tiles have been marked complete and upload only those
+            completed_idxs = getattr(self.view, "get_completed_indices", lambda: [])()
+            if not completed_idxs:
+                QtWidgets.QMessageBox.information(self, "Nothing to upload", "No tiles are marked complete. Mark tiles as complete before uploading.")
+                return
+
+            tiles_to_upload = [self.tiles_np[i] for i in completed_idxs]
+            masks_to_upload = [self.view.get_mask_for_tile(i) for i in completed_idxs]
+
             upload_tiles_batch(base_name=self.image_title.replace(" ", "_"),
-                               tiles_rgb=self.tiles_np,
-                               masks=[self.view.get_mask_for_tile(i) for i in range(len(self.tiles_np))],
-                               subfolder=f"{self.image_title} - annotated")
+                               tiles_rgb=tiles_to_upload,
+                               masks=masks_to_upload,
+                               subfolder=f"{self.image_title} - annotated",
+                               orig_indices=completed_idxs)
             self.on_next()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", str(e))

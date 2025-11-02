@@ -574,6 +574,10 @@ class TileBrowser(QtWidgets.QWidget):
         if mask is None:
             return np.full((self.tile_px, self.tile_px), 255, dtype=np.uint8)
         return mask.copy()
+
+    def get_completed_indices(self) -> List[int]:
+        """Return a sorted list of tile indices marked as complete."""
+        return sorted(self._completed)
     
     # ---- interactions ----
     def _on_eraser_changed(self, on: bool):
