@@ -3,6 +3,7 @@ from typing import List, Optional
 from PyQt6 import QtWidgets, QtGui, QtCore
 from group_bar import GROUP_COLORS, GroupBar
 from typing import List, Tuple
+from pathlib import Path
 
 
 def np_to_qpixmap(arr: np.ndarray) -> QtGui.QPixmap:
@@ -20,6 +21,22 @@ def np_to_qpixmap(arr: np.ndarray) -> QtGui.QPixmap:
 class TileItem(QtWidgets.QGraphicsObject):
     tileClicked = QtCore.pyqtSignal(int)
     contextRequested = QtCore.pyqtSignal(int, QtCore.QPoint)  # (index, global point)
+    _badge_icon: QtGui.QPixmap | None = None  # lazy-loaded checkmark icon
+
+    @staticmethod
+    def _load_badge_icon() -> QtGui.QPixmap | None:
+        if TileItem._badge_icon is not None:
+            return TileItem._badge_icon
+        try:
+            icon_path = Path(__file__).resolve().parent.parent / "assets" / "complete_icon.png"
+            pm = QtGui.QPixmap(str(icon_path))
+            if not pm.isNull():
+                TileItem._badge_icon = pm
+                return pm
+        except Exception:
+            pass
+        TileItem._badge_icon = None
+        return None
 
     def __init__(self, index: int, pix: QtGui.QPixmap, tile_size: int, enabled: bool, completed: bool = False):
         super().__init__()
@@ -59,9 +76,43 @@ class TileItem(QtWidgets.QGraphicsObject):
         if not self.enabled_flag:
             painter.fillRect(self.boundingRect(), QtGui.QColor(255, 255, 255, 140))
 
-        # completed overlay (semi-transparent green)
+        # completed overlay (semi-transparent green) + small badge in top-right
         if self.completed:
             painter.fillRect(self.boundingRect(), QtGui.QColor(76, 175, 80, 110))
+
+            # draw badge
+            margin = max(3, self.tile_size // 40)
+            badge = max(14, min(24, self.tile_size // 10))
+            x = self.tile_size - margin - badge
+            y = margin
+
+            painter.save()
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+            # background circle for contrast
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(QtGui.QColor(255, 255, 255, 220))
+            painter.drawEllipse(x, y, badge, badge)
+
+            icon = TileItem._load_badge_icon()
+            if icon is not None:
+                painter.drawPixmap(x, y, badge, badge, icon)
+            else:
+                # Fallback: draw a green checkmark
+                pen = QtGui.QPen(QtGui.QColor(76, 175, 80))
+                pen.setWidth(max(2, badge // 8))
+                pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+                painter.setPen(pen)
+                # simple check path
+                x0 = x + badge * 0.25
+                y0 = y + badge * 0.55
+                x1 = x + badge * 0.45
+                y1 = y + badge * 0.75
+                x2 = x + badge * 0.78
+                y2 = y + badge * 0.30
+                painter.drawLine(QtCore.QPointF(x0, y0), QtCore.QPointF(x1, y1))
+                painter.drawLine(QtCore.QPointF(x1, y1), QtCore.QPointF(x2, y2))
+            painter.restore()
 
     def set_completed(self, done: bool):
         if self.completed != done:
