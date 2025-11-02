@@ -277,10 +277,8 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._eraser = bool(active)
         # Show brush cursor if eraser or a group is active
         self._cursor_item.setVisible(self._eraser or self._active_group != -1)
-        # Change cursor ring color to indicate eraser
-        pen = QtGui.QPen(QtGui.QColor(255, 170, 0, 240) if self._eraser else QtGui.QColor(255, 255, 255, 220))
-        pen.setWidth(1)
-        self._cursor_item.setPen(pen)
+        # Update cursor ring color (eraser takes precedence)
+        self._refresh_cursor_pen()
 
     # --- tweak existing set_active_group to play nice with eraser ---
     def set_active_group(self, gid: int):
@@ -288,6 +286,24 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._active_group = gid
         # cursor visible if eraser or group active
         self._cursor_item.setVisible(self._eraser or gid != -1)
+        # Update cursor color to match active group when not erasing
+        self._refresh_cursor_pen()
+
+    def _refresh_cursor_pen(self):
+        """Set cursor ring color based on eraser/group state."""
+        if self._eraser:
+            color = QtGui.QColor(255, 170, 0, 240)  # orange for eraser
+        elif self._active_group != -1:
+            # color of the active group
+            hexc = GROUP_COLORS.get(self._active_group, "#FFFFFF")
+            color = QtGui.QColor(hexc)
+            color.setAlpha(240)
+        else:
+            color = QtGui.QColor(255, 255, 255, 220)  # default white
+
+        pen = QtGui.QPen(color)
+        pen.setWidth(1)
+        self._cursor_item.setPen(pen)
 
 
     # --- modify _paint_at to erase when eraser is active ---
@@ -633,7 +649,9 @@ class TileBrowser(QtWidgets.QWidget):
         self.groups.setVisible(False)  # Hide swatch bar in grid view
 
     def _on_group_changed(self, gid: int):
-        if self.groups.eraser():      # if bar forced eraser off, this will be False; otherwise ensure
+        # Only force eraser OFF when a concrete group is selected (gid != -1).
+        # When gid == -1 (e.g., switching to eraser), don't turn it off here.
+        if gid != -1 and self.groups.eraser():
             self.groups.set_eraser(False)
         self.detail.set_active_group(gid)
 
