@@ -574,10 +574,13 @@ class TileBrowser(QtWidgets.QWidget):
         self.title.setText(text)
 
     def set_tiles_with_flags(self, tiles_np: List[np.ndarray], enabled: List[bool], layout: Tuple[int,int]):
+        # New image: reset all per-image state
         self.tiles_pix = [np_to_qpixmap(t) for t in tiles_np]
         self.enabled = enabled[:]
         self._rows, self._cols = layout
-        self._completed.clear()  # reset completed state for new image
+        self._completed.clear()    # reset completed state for new image
+        self._masks.clear()        # reset stored masks for all tiles
+        self._current_idx = None   # clear any in-progress detail selection
         self.grid.populate_fixed(self.tiles_pix, self.enabled, self._rows, self._cols, completed=self._completed)
         self._show_grid()
 
