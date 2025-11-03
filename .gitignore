@@ -6,3 +6,7 @@ __pycache__/
 *.clasp.json
 
 *appsscript.json
+
+*build/
+*dist/
+*.spec
