@@ -4,7 +4,9 @@ from PyQt6 import QtWidgets, QtGui, QtCore
 from group_bar import GROUP_COLORS, GroupBar
 from typing import List, Tuple
 from pathlib import Path
+import os
 
+basedir = os.path.dirname(__file__)
 
 def np_to_qpixmap(arr: np.ndarray) -> QtGui.QPixmap:
     assert arr.ndim == 3 and arr.shape[2] in (3, 4)
@@ -28,8 +30,9 @@ class TileItem(QtWidgets.QGraphicsObject):
         if TileItem._badge_icon is not None:
             return TileItem._badge_icon
         try:
-            icon_path = Path(__file__).resolve().parent.parent / "assets" / "complete_icon.png"
-            pm = QtGui.QPixmap(str(icon_path))
+            # icon_path = Path(__file__).resolve().parent.parent / "assets" / "complete_icon.png"
+            icon_path = os.path.join(basedir, "assets", "complete_icon.png")
+            pm = QtGui.QPixmap(icon_path)
             if not pm.isNull():
                 TileItem._badge_icon = pm
                 return pm

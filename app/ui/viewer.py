@@ -1,4 +1,4 @@
-import sys, io
+import sys, io, os
 import numpy as np
 import cv2
 from PyQt6 import QtWidgets, QtGui, QtCore
@@ -15,6 +15,7 @@ from webapp_interface_funcs import (
     skip_image,
 )
 
+basedir = os.path.dirname(__file__)
 
 TILE_SIZE = 256
 
@@ -50,7 +51,7 @@ class MainWindow(QtWidgets.QWidget):
     def __init__(self, tile_size: int = TILE_SIZE):
         super().__init__()
         self.setWindowTitle("Elastin Queue Tile Viewer")
-        self.setWindowIcon(QIcon(r"app/assets/logo.png"))
+        # self.setWindowIcon(QIcon(r"app/assets/logo.png"))
         self.web_app_url = WEB_APP_URL
         self.tile_size = tile_size
 
@@ -369,12 +370,11 @@ class MainWindow(QtWidgets.QWidget):
         return tiles, enabled, (rows, cols)
 
 
-def main():
+
+if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
+    app.setWindowIcon(QIcon(os.path.join(basedir, "assets", "logo.png")))
     w = MainWindow()
     w.resize(1100, 800)
     w.show()
     sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()

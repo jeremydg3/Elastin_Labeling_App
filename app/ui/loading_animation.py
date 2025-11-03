@@ -3,7 +3,9 @@ Loading animation dialog with a spinning icon.
 """
 from PyQt6 import QtWidgets, QtGui, QtCore
 from pathlib import Path
+import os
 
+basedir = os.path.dirname(__file__)
 
 class LoadingDialog(QtWidgets.QDialog):
     """
@@ -75,7 +77,7 @@ class LoadingDialog(QtWidgets.QDialog):
         
         # Load and display the Alan gif
         try:
-            alan_path = Path(__file__).resolve().parent.parent / "assets" / "calculating-alan.gif"
+            alan_path = os.path.join(basedir, "assets", "calculating-alan.gif")
             movie = QtGui.QMovie(str(alan_path))
             if not movie.isValid():
                 # Fallback to spinner if gif not found
@@ -104,8 +106,8 @@ class LoadingDialog(QtWidgets.QDialog):
         
         # Load and display the Alan gif
         try:
-            alan_path = Path(__file__).resolve().parent.parent / "assets" / "orange-cat-loading.gif"
-            movie = QtGui.QMovie(str(alan_path))
+            cat_path = os.path.join(basedir, "assets", "orange-cat-loading.gif")
+            movie = QtGui.QMovie(cat_path)
             if not movie.isValid():
                 # Fallback to spinner if gif not found
                 self._using_cat = False
