@@ -56,6 +56,15 @@ args.extend([
     "--clean",      # Clean PyInstaller cache before building
 ])
 
+# Ensure imagecodecs compiled extensions and data are collected (needed for lzw_decode, etc.)
+args.extend([
+    "--collect-binaries", "imagecodecs",
+    "--collect-data", "imagecodecs",
+    "--collect-submodules", "imagecodecs",
+    # tifffile sometimes lazy-loads plugins; collect them as well
+    "--collect-submodules", "tifffile",
+])
+
 print("Building standalone executable...")
 print(f"Script: {viewer_script}")
 print(f"Assets directory: {assets_dir}")
