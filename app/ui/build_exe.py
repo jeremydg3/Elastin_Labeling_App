@@ -16,8 +16,7 @@ asset_files = [
     (str(assets_dir / "logo.png"), "assets"),
     (str(assets_dir / "complete_icon.png"), "assets"),
     (str(assets_dir / "calculating-alan.gif"), "assets"),
-    (str(assets_dir / "orange-cat-loading.gif"), "assets"),
-    (str(assets_dir / "wip_icon.png"), "assets"),
+    (str(assets_dir / "orange-cat-loading.gif"), "assets")
 ]
 
 # Build PyInstaller arguments
@@ -45,6 +44,7 @@ hidden_imports = [
     "requests",
     "base64",
     "csv",
+    "imagecodecs"
 ]
 
 for module in hidden_imports:
