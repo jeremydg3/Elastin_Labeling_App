@@ -12,7 +12,7 @@ import math
 import mimetypes
 import os
 import csv
-from typing import List
+from typing import List, Any, Callable, Optional
 
 
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw8mQLmfC5dYQ2Hc41M3d-nTKsxx_oRsgIl_c6iFdpkeoerrrI1OaoIJdbCSkoHPNHDSg/exec"
@@ -85,6 +85,25 @@ def upload_tiles_batch(base_name: str,
     if not res.get("ok"):
         raise RuntimeError(f"Upload failed: {res}")
 
+class Worker(QtCore.QObject):
+    """Generic worker to run a callable in a QThread and emit results back to UI."""
+    finished = QtCore.pyqtSignal(object)
+    error = QtCore.pyqtSignal(str)
+
+    def __init__(self, fn: Callable, *args: Any, **kwargs: Any):
+        super().__init__()
+        self._fn = fn
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    @QtCore.pyqtSlot()
+    def run(self):
+        try:
+            res = self._fn(*self._args, **self._kwargs)
+            self.finished.emit(res)
+        except Exception as e:
+            self.error.emit(str(e))
+ 
     
 class MainWindow(QtWidgets.QWidget):
     """
@@ -126,6 +145,9 @@ class MainWindow(QtWidgets.QWidget):
 
         # --- state ---
         self.current = None  # {fileId,fileName,...}
+        self.tiles_np = []  # type: List[np.ndarray]  # tiles for current image
+        self._bg_threads = []  # type: list[QtCore.QThread]
+        self._bg_workers = []  # type: list[Worker]
 
         # --- wiring ---
         self.btnNext.clicked.connect(self.on_next)
@@ -136,95 +158,107 @@ class MainWindow(QtWidgets.QWidget):
     # ------------------ Actions ------------------
 
     def on_next(self):
-        try:
-            # Clear tiles
-            self.view.set_title("")
-            self.view.set_tiles_with_flags([], [], layout=(0, 0))
+        # Clear current view immediately
+        self.view.set_title("")
+        self.view.set_tiles_with_flags([], [], layout=(0, 0))
 
-            self._busy(True)
+        self._busy(True, "Fetching image bytes...")
+        self.status.setText("Fetching image bytes...")
+
+        def _task_fetch():
             # Claim next
             r = requests.post(self.web_app_url, json={"action": "next"}, timeout=60)
             r.raise_for_status()
             data = r.json()
-
-            # Empty queue
             if data.get("done"):
-                self.current = None
-                self.view.set_title("")
-                self.view.set_tiles_with_flags([], [], layout=(0, 0))
-                self.status.setText(data.get("message", "Queue empty."))
-                self._set_work_buttons_enabled(False)
-                return
+                return {"done": True, "message": data.get("message", "Queue empty.")}
 
-            self.current = data
             fname = data.get("fileName", "(unnamed)")
-            self.view.set_title(fname)
-            self.status.setText("Fetching image bytes...")
-
-            # Fetch base64-encoded TIFF bytes
             raw_url = f"{self.web_app_url}?raw={data['fileId']}"
             rb = requests.get(raw_url, timeout=120)
             rb.raise_for_status()
-
-            # Base64 decode → numpy via tifffile
             b = base64.b64decode(rb.text)
-            arr = tifffile.imread(io.BytesIO(b))  # np.ndarray
-
-            # Normalize/convert to 8-bit RGB
+            arr = tifffile.imread(io.BytesIO(b))
             img_rgb = self._to_rgb_uint8(arr)
-
-            # Split into tiles with padding; partial tiles disabled
-            self.tiles_np, enabled_flags, (rows, cols) = self._split_into_tiles_with_padding(
+            tiles_np, enabled_flags, (rows, cols) = self._split_into_tiles_with_padding(
                 img_rgb, tile=self.tile_size, pad_value=0
             )
-            self.image_title = fname
-            self.view.set_title(fname)
+            return {
+                "done": False,
+                "data": data,
+                "fname": fname,
+                "img_shape": img_rgb.shape,
+                "tiles": tiles_np,
+                "enabled": enabled_flags,
+                "layout": (rows, cols),
+            }
+
+        def _on_result(res: dict):
+            if res.get("done"):
+                self.current = None
+                self.view.set_title("")
+                self.view.set_tiles_with_flags([], [], layout=(0, 0))
+                self.status.setText(res.get("message", "Queue empty."))
+                self._set_work_buttons_enabled(False)
+                return
+            self.current = res["data"]
+            self.image_title = res["fname"]
+            self.view.set_title(self.image_title)
+            self.tiles_np = res["tiles"]
+            enabled_flags = res["enabled"]
+            rows, cols = res["layout"]
+            img_h, img_w = res["img_shape"][0], res["img_shape"][1]
             self.view.set_tiles_with_flags(self.tiles_np, enabled_flags, (rows, cols))
-            self.status.setText(f"{fname}  —  image: {img_rgb.shape[1]}x{img_rgb.shape[0]}  tiles: {rows}x{cols}")
+            self.status.setText(f"{self.image_title}  —  image: {img_w}x{img_h}  tiles: {rows}x{cols}")
             self._set_work_buttons_enabled(True)
 
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Error", str(e))
-        finally:
-            self._busy(False)
+        self._run_in_thread(_task_fetch, on_result=_on_result, on_error=self._show_error)
 
     def on_done(self):
         if not self.current:
             return
-        try:
-            self._busy(True)
-            # Determine which tiles have been marked complete and upload only those
-            completed_idxs = getattr(self.view, "get_completed_indices", lambda: [])()
-            if not completed_idxs:
-                QtWidgets.QMessageBox.information(self, "Nothing to upload", "No tiles are marked complete. Mark tiles as complete before uploading.")
-                return
+        # Determine which tiles have been marked complete and upload only those
+        completed_idxs = getattr(self.view, "get_completed_indices", lambda: [])()
+        if not completed_idxs:
+            QtWidgets.QMessageBox.information(self, "Nothing to upload", "No tiles are marked complete. Mark tiles as complete before uploading.")
+            return
 
-            tiles_to_upload = [self.tiles_np[i] for i in completed_idxs]
-            masks_to_upload = [self.view.get_mask_for_tile(i) for i in completed_idxs]
+        tiles_to_upload = [self.tiles_np[i] for i in completed_idxs]
+        masks_to_upload = [self.view.get_mask_for_tile(i) for i in completed_idxs]
 
+        self._busy(True, "Uploading completed tiles...")
+        self.status.setText("Uploading completed tiles...")
+
+        def _task_upload():
             upload_tiles_batch(base_name=self.image_title.replace(" ", "_"),
                                tiles_rgb=tiles_to_upload,
                                masks=masks_to_upload,
                                subfolder=f"{self.image_title} - annotated",
                                orig_indices=completed_idxs)
+            return {"count": len(tiles_to_upload)}
+
+        def _on_uploaded(_res):
             self.on_next()
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Error", str(e))
-        finally:
-            self._busy(False)
+
+        self._run_in_thread(_task_upload, on_result=_on_uploaded, on_error=self._show_error)
 
 
     def on_skip(self):
         if not self.current:
             return
-        try:
-            self._busy(True)
-            requests.post(self.web_app_url, json={"action": "skip", "fileId": self.current["fileId"]}, timeout=30)
+        self._busy(True, "Skipping image, please wait...")
+        self.status.setText("Skipping image...")
+
+        file_id = self.current["fileId"]
+
+        def _task_skip():
+            requests.post(self.web_app_url, json={"action": "skip", "fileId": file_id}, timeout=30)
+            return True
+
+        def _on_skipped(_res):
             self.on_next()
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Error", str(e))
-        finally:
-            self._busy(False)
+
+        self._run_in_thread(_task_skip, on_result=_on_skipped, on_error=self._show_error)
 
 
     # def upload_file_to_queue(self, path: str):
@@ -263,27 +297,137 @@ class MainWindow(QtWidgets.QWidget):
 
 
     # ------------------ Helpers ------------------
-
-    def _busy(self, yes: bool):
-        app = QtWidgets.QApplication
+    def _busy(self, yes: bool, action_text: str = "Processing..."):
         if yes:
             if self._busy_depth == 0:
-                app.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+                # Create and show loading dialog
+                self.loading_dialog = QtWidgets.QDialog(self)
+                self.loading_dialog.setWindowTitle("Loading...")
+                self.loading_dialog.setModal(True)
+                self.loading_dialog.setWindowFlags(
+                    QtCore.Qt.WindowType.Dialog | 
+                    QtCore.Qt.WindowType.CustomizeWindowHint |
+                    QtCore.Qt.WindowType.WindowTitleHint
+                )
+                
+                # Create loading animation (spinning icon)
+                self.loading_label = QtWidgets.QLabel()
+                self.loading_movie = QtGui.QMovie()
+                
+                # Create a simple spinning animation programmatically
+                pixmap = QtGui.QPixmap(50, 50)
+                pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+                painter = QtGui.QPainter(pixmap)
+                painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+                painter.setBrush(QtGui.QBrush(QtCore.Qt.GlobalColor.blue))
+                painter.drawEllipse(20, 5, 10, 10)
+                painter.end()
+                
+                self.loading_label.setPixmap(pixmap)
+                self.loading_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                
+                # Add rotation animation
+                self.rotation_timer = QtCore.QTimer()
+                self.rotation_angle = 0
+                self.rotation_timer.timeout.connect(self._rotate_loading_icon)
+                self.rotation_timer.start(50)  # Update every 50ms
+                
+                # Layout
+                layout = QtWidgets.QVBoxLayout()
+                layout.addWidget(QtWidgets.QLabel(action_text))
+                layout.addWidget(self.loading_label)
+                self.loading_dialog.setLayout(layout)
+                self.loading_dialog.resize(200, 100)
+                
+                # Center on parent
+                if self.parentWidget():
+                    parent_geo = self.geometry()
+                    x = parent_geo.x() + (parent_geo.width() - 200) // 2
+                    y = parent_geo.y() + (parent_geo.height() - 100) // 2
+                    self.loading_dialog.move(x, y)
+                
+                self.loading_dialog.show()
+                
             self._busy_depth += 1
         else:
             if self._busy_depth > 0:
                 self._busy_depth -= 1
             if self._busy_depth == 0:
-                # Pop ALL leftover overrides just in case
-                while app.overrideCursor() is not None:
-                    app.restoreOverrideCursor()
-                # Nudge event loop so cursor updates immediately
+                # Stop animation and close dialog
+                if hasattr(self, 'rotation_timer'):
+                    self.rotation_timer.stop()
+                if hasattr(self, 'loading_dialog'):
+                    self.loading_dialog.close()
+                    delattr(self, 'loading_dialog')
+                
+                # Process events to ensure UI updates
                 QtCore.QCoreApplication.processEvents()
 
-        # Buttons state (optional)
+        # Buttons state
         self.btnNext.setEnabled(self._busy_depth == 0 and self.current is None)
         self.btnDone.setEnabled(self._busy_depth == 0 and self.current is not None)
         self.btnSkip.setEnabled(self._busy_depth == 0 and self.current is not None)
+
+    def _run_in_thread(self, fn: Callable, args: Optional[tuple] = None, kwargs: Optional[dict] = None,
+                       on_result: Optional[Callable[[Any], None]] = None,
+                       on_error: Optional[Callable[[str], None]] = None):
+        """Run fn in a background QThread; ensure busy state is cleared when thread ends."""
+        args = args or ()
+        kwargs = kwargs or {}
+        thread = QtCore.QThread(self)
+        worker = Worker(fn, *args, **kwargs)
+        worker.moveToThread(thread)
+
+        # Retain references to prevent Python GC from collecting them prematurely
+        self._bg_threads.append(thread)
+        self._bg_workers.append(worker)
+
+        def _thread_finished():
+            # Always clear busy when the operation finishes (success or error)
+            self._busy(False)
+            # Cleanup references
+            try:
+                self._bg_threads.remove(thread)
+            except ValueError:
+                pass
+            try:
+                self._bg_workers.remove(worker)
+            except ValueError:
+                pass
+            thread.deleteLater()
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda res: (on_result and on_result(res)))
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.error.connect(lambda msg: (on_error and on_error(msg)))
+        worker.error.connect(thread.quit)
+        worker.error.connect(worker.deleteLater)
+        thread.finished.connect(_thread_finished)
+        thread.start()
+
+    def _show_error(self, message: str):
+        QtWidgets.QMessageBox.critical(self, "Error", message)
+        self.status.setText(message)
+
+    def _rotate_loading_icon(self):
+        """Helper method to rotate the loading icon"""
+        if hasattr(self, 'loading_label'):
+            self.rotation_angle = (self.rotation_angle + 15) % 360
+            
+            # Create rotated pixmap
+            pixmap = QtGui.QPixmap(50, 50)
+            pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+            painter = QtGui.QPainter(pixmap)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            painter.translate(25, 25)
+            painter.rotate(self.rotation_angle)
+            painter.setBrush(QtGui.QBrush(QtCore.Qt.GlobalColor.blue))
+            painter.drawEllipse(-5, -20, 10, 10)
+            painter.drawEllipse(-5, 10, 10, 10)
+            painter.end()
+            
+            self.loading_label.setPixmap(pixmap)
 
 
     def _set_work_buttons_enabled(self, enabled: bool):
