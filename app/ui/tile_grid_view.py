@@ -1,9 +1,7 @@
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from PyQt6 import QtWidgets, QtGui, QtCore
 from group_bar import GROUP_COLORS, GroupBar
-from typing import List, Tuple
-from pathlib import Path
 import os
 
 basedir = os.path.dirname(__file__)

@@ -2,7 +2,6 @@
 Loading animation dialog with a spinning icon.
 """
 from PyQt6 import QtWidgets, QtGui, QtCore
-from pathlib import Path
 import os
 
 basedir = os.path.dirname(__file__)
