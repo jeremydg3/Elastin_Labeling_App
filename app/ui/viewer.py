@@ -163,7 +163,7 @@ class MainWindow(QtWidgets.QWidget):
         self.view.set_title("")
         self.view.set_tiles_with_flags([], [], layout=(0, 0))
 
-        self._busy(True, "Fetching image bytes...")
+        self._busy(True, "Fetching image bytes... 'c' or 'a' for easter egg (:")
         self.status.setText("Fetching image bytes...")
 
         def _task_fetch():
