@@ -1,90 +1,22 @@
 import sys, io
 import numpy as np
-import requests
+import cv2
 from PyQt6 import QtWidgets, QtGui, QtCore
 from PyQt6.QtGui import QIcon
-import tifffile
-import base64
-import io
-import cv2
-from tile_grid_view import TileBrowser
-from loading_animation import LoadingDialog
 import math
-import mimetypes
-import os
-import csv
 from typing import List, Any, Callable, Optional
 
+from tile_grid_view import TileBrowser
+from loading_animation import LoadingDialog
+from webapp_interface_funcs import (
+    WEB_APP_URL,
+    fetch_next_image,
+    upload_tiles_batch,
+    skip_image,
+)
 
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw8mQLmfC5dYQ2Hc41M3d-nTKsxx_oRsgIl_c6iFdpkeoerrrI1OaoIJdbCSkoHPNHDSg/exec"
+
 TILE_SIZE = 256
-
-def encode_png_b64(tile_rgb: np.ndarray) -> str:
-    # tile_rgb: (255,255,3) RGB uint8
-    ok, buf = cv2.imencode(".png", cv2.cvtColor(tile_rgb, cv2.COLOR_RGB2BGR))
-    if not ok:
-        raise RuntimeError("cv2.imencode(.png) failed")
-    return base64.b64encode(buf.tobytes()).decode("ascii")
-
-def encode_csv_b64(mask: np.ndarray) -> str:
-    # mask: (255,255) uint8 (values 0..9, 255)
-    # CSV in-memory text -> utf-8 bytes -> base64
-    s = io.StringIO()
-    writer = csv.writer(s, lineterminator="\n")
-    # write as integers; faster than savetxt for small tiles
-    mask_uint16 = mask.astype(np.uint16)
-    for i in range(mask_uint16.shape[0]):
-        writer.writerow(mask_uint16[i].tolist())
-    text = s.getvalue().encode("utf-8")
-    return base64.b64encode(text).decode("ascii")
-
-def upload_tiles_batch(base_name: str,
-                       tiles_rgb: List[np.ndarray],
-                       masks: List[np.ndarray],
-                       subfolder: str | None = None,
-                       orig_indices: List[int] | None = None):
-    """
-    Sends tiles in batches; no local files created.
-    If orig_indices is provided, it is used for naming and the "i" field to
-    preserve the original tile indices from the source image grid.
-    Returns list of {i, pngId, csvId} for all tiles.
-    """
-    assert len(tiles_rgb) == len(masks)
-    batch_size = len(tiles_rgb)
-
-    items = []
-    for i in range(batch_size):
-        i_orig = orig_indices[i] if orig_indices is not None else i
-        items.append({
-            "i": i_orig,
-            "png_b64": encode_png_b64(tiles_rgb[i]),
-            "csv_b64": encode_csv_b64(masks[i]),
-            # optional custom names:
-            "png_name": f"{base_name}_tile_{i_orig:04d}.png",
-            "csv_name": f"{base_name}_tile_{i_orig:04d}.csv",
-        })
-
-    payload = {
-        "action": "upload_tiles",
-        "baseName": base_name,
-        "subfolder": subfolder,  # optional label for folder under parent
-        "items": items,
-    }
-    r = requests.post(WEB_APP_URL, json=payload, timeout=300)
-    r.raise_for_status()
-    try:
-        res = r.json()
-    except requests.exceptions.HTTPError as e:
-        print(f"HTTP error occurred: {e}")
-        print(f"Response text: {e.response.text}")
-    except requests.exceptions.JSONDecodeError as e:
-        print(f"JSONDecodeError: {e}")
-        print(f"Response text that caused the error: {r.text if 'response' in locals() else 'No response available'}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-
-    if not res.get("ok"):
-        raise RuntimeError(f"Upload failed: {res}")
 
 class Worker(QtCore.QObject):
     """Generic worker to run a callable in a QThread and emit results back to UI."""
@@ -167,27 +99,21 @@ class MainWindow(QtWidgets.QWidget):
         self.status.setText("Fetching image bytes...")
 
         def _task_fetch():
-            # Claim next
-            r = requests.post(self.web_app_url, json={"action": "next"}, timeout=60)
-            r.raise_for_status()
-            data = r.json()
-            if data.get("done"):
-                return {"done": True, "message": data.get("message", "Queue empty.")}
-
-            fname = data.get("fileName", "(unnamed)")
-            raw_url = f"{self.web_app_url}?raw={data['fileId']}"
-            rb = requests.get(raw_url, timeout=120)
-            rb.raise_for_status()
-            b = base64.b64decode(rb.text)
-            arr = tifffile.imread(io.BytesIO(b))
-            img_rgb = self._to_rgb_uint8(arr)
+            # Use webapp interface function
+            result = fetch_next_image(self.web_app_url)
+            
+            if result.get("done"):
+                return result
+            
+            # Process the image
+            img_rgb = self._to_rgb_uint8(result["img_array"])
             tiles_np, enabled_flags, (rows, cols) = self._split_into_tiles_with_padding(
                 img_rgb, tile=self.tile_size, pad_value=0
             )
             return {
                 "done": False,
-                "data": data,
-                "fname": fname,
+                "data": result["data"],
+                "fname": result["fname"],
                 "img_shape": img_rgb.shape,
                 "tiles": tiles_np,
                 "enabled": enabled_flags,
@@ -253,7 +179,7 @@ class MainWindow(QtWidgets.QWidget):
         file_id = self.current["fileId"]
 
         def _task_skip():
-            requests.post(self.web_app_url, json={"action": "skip", "fileId": file_id}, timeout=30)
+            skip_image(file_id, self.web_app_url)
             return True
 
         def _on_skipped(_res):
