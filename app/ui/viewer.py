@@ -8,6 +8,7 @@ import base64
 import io
 import cv2
 from tile_grid_view import TileBrowser
+from loading_animation import LoadingDialog
 import math
 import mimetypes
 import os
@@ -301,51 +302,7 @@ class MainWindow(QtWidgets.QWidget):
         if yes:
             if self._busy_depth == 0:
                 # Create and show loading dialog
-                self.loading_dialog = QtWidgets.QDialog(self)
-                self.loading_dialog.setWindowTitle("Loading...")
-                self.loading_dialog.setModal(True)
-                self.loading_dialog.setWindowFlags(
-                    QtCore.Qt.WindowType.Dialog | 
-                    QtCore.Qt.WindowType.CustomizeWindowHint |
-                    QtCore.Qt.WindowType.WindowTitleHint
-                )
-                
-                # Create loading animation (spinning icon)
-                self.loading_label = QtWidgets.QLabel()
-                self.loading_movie = QtGui.QMovie()
-                
-                # Create a simple spinning animation programmatically
-                pixmap = QtGui.QPixmap(50, 50)
-                pixmap.fill(QtCore.Qt.GlobalColor.transparent)
-                painter = QtGui.QPainter(pixmap)
-                painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-                painter.setBrush(QtGui.QBrush(QtCore.Qt.GlobalColor.blue))
-                painter.drawEllipse(20, 5, 10, 10)
-                painter.end()
-                
-                self.loading_label.setPixmap(pixmap)
-                self.loading_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                
-                # Add rotation animation
-                self.rotation_timer = QtCore.QTimer()
-                self.rotation_angle = 0
-                self.rotation_timer.timeout.connect(self._rotate_loading_icon)
-                self.rotation_timer.start(50)  # Update every 50ms
-                
-                # Layout
-                layout = QtWidgets.QVBoxLayout()
-                layout.addWidget(QtWidgets.QLabel(action_text))
-                layout.addWidget(self.loading_label)
-                self.loading_dialog.setLayout(layout)
-                self.loading_dialog.resize(200, 100)
-                
-                # Center on parent
-                if self.parentWidget():
-                    parent_geo = self.geometry()
-                    x = parent_geo.x() + (parent_geo.width() - 200) // 2
-                    y = parent_geo.y() + (parent_geo.height() - 100) // 2
-                    self.loading_dialog.move(x, y)
-                
+                self.loading_dialog = LoadingDialog(self, message=action_text)
                 self.loading_dialog.show()
                 
             self._busy_depth += 1
@@ -354,8 +311,6 @@ class MainWindow(QtWidgets.QWidget):
                 self._busy_depth -= 1
             if self._busy_depth == 0:
                 # Stop animation and close dialog
-                if hasattr(self, 'rotation_timer'):
-                    self.rotation_timer.stop()
                 if hasattr(self, 'loading_dialog'):
                     self.loading_dialog.close()
                     delattr(self, 'loading_dialog')
@@ -409,26 +364,6 @@ class MainWindow(QtWidgets.QWidget):
     def _show_error(self, message: str):
         QtWidgets.QMessageBox.critical(self, "Error", message)
         self.status.setText(message)
-
-    def _rotate_loading_icon(self):
-        """Helper method to rotate the loading icon"""
-        if hasattr(self, 'loading_label'):
-            self.rotation_angle = (self.rotation_angle + 15) % 360
-            
-            # Create rotated pixmap
-            pixmap = QtGui.QPixmap(50, 50)
-            pixmap.fill(QtCore.Qt.GlobalColor.transparent)
-            painter = QtGui.QPainter(pixmap)
-            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-            painter.translate(25, 25)
-            painter.rotate(self.rotation_angle)
-            painter.setBrush(QtGui.QBrush(QtCore.Qt.GlobalColor.blue))
-            painter.drawEllipse(-5, -20, 10, 10)
-            painter.drawEllipse(-5, 10, 10, 10)
-            painter.end()
-            
-            self.loading_label.setPixmap(pixmap)
-
 
     def _set_work_buttons_enabled(self, enabled: bool):
         self.btnDone.setEnabled(enabled)
