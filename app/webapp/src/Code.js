@@ -1,0 +1,222 @@
+/***** === SETTINGS === *****/
+const CFG = {
+  FOLDER_ID: '1Ydw52sIeBbl-VT2ihATxiviR7sRaMgxA', // images live here
+  FOLDER_STORE_LABEL_TILES: '1kUHYSn2D11seEPhUzHaSsASY81ruXKqd', // Folder to upload labeled tiles
+  FOLDER_STORE_IMAGE_TILES: '1Ai6aaY3aYDO7n_uLwuEzR9JF7Vc6Y7qW', // Folder to upload image tiles
+  SHEET_NAME: 'Sheet1',              // tab name
+  STALE_MINUTES: 30                  // reclaim if older than this
+};
+
+/***** === HELPERS === *****/
+function sheet_() {
+  return SpreadsheetApp.getActive().getSheetByName(CFG.SHEET_NAME);
+}
+function now_() { return new Date(); }
+function minutesAgo_(d) {
+  return (now_().getTime() - new Date(d).getTime()) / 60000;
+}
+function email_() {
+  // In Google Workspace, returns signed-in user email. Else may be blank.
+  try { return Session.getActiveUser().getEmail() || 'anonymous'; } catch(e) { return 'anonymous'; }
+}
+function api(action, payload) {
+  const me = email_();
+  if (action === 'next')     return popNext_(me);
+  if (action === 'done')     return payload && payload.fileId ? markDone_(payload.fileId, me) : { ok:false, message:'fileId required' };
+  if (action === 'skip')     return payload && payload.fileId ? skip_(payload.fileId, me) : { ok:false, message:'fileId required' };
+  return { error: 'Unknown action.' };
+}
+
+/***** === QUEUE SEEDING === *****/
+// Run once to list all images in folder into the sheet.
+function initQueueFromFolder() {
+  const sh = sheet_();
+  const folder = DriveApp.getFolderById(CFG.FOLDER_ID);
+  const files = folder.getFiles();
+  const rows = [];
+  while (files.hasNext()) {
+    const f = files.next();
+    rows.push([f.getId(), f.getName(), '', '', '', '']);
+  }
+  if (rows.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, 6).setValues(rows);
+  }
+}
+
+// Optional: clear claims & done (keep file list)
+function resetQueue() {
+  const sh = sheet_();
+  const rng = sh.getDataRange().getValues();
+  for (let r = 1; r < rng.length; r++) {
+    sh.getRange(r + 1, 3, 1, 4).clearContent(); // status..doneAt
+  }
+}
+
+// Optional: shuffle unclaimed items
+function shuffleUnclaimed() {
+  const sh = sheet_();
+  const data = sh.getDataRange().getValues();
+  const header = data.shift();
+  const claimed = [];
+  const unclaimed = [];
+  data.forEach(row => (row[2] ? claimed : unclaimed).push(row));
+  for (let i = unclaimed.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [unclaimed[i], unclaimed[j]] = [unclaimed[j], unclaimed[i]];
+  }
+  const out = [header].concat(claimed).concat(unclaimed);
+  sh.clearContents();
+  sh.getRange(1,1,out.length,out[0].length).setValues(out);
+}
+
+/***** === CORE QUEUE OPS (atomic) === *****/
+function findNextRow_(data, staleMinutes) {
+  // prefer: first unclaimed; else reclaim stale claimed
+  for (let r = 1; r < data.length; r++) {
+    if (!data[r][2]) return r; // status empty
+  }
+  for (let r = 1; r < data.length; r++) {
+    const status = data[r][2], claimedAt = data[r][4];
+    if (status === 'claimed' && claimedAt && minutesAgo_(claimedAt) >= staleMinutes) {
+      return r;
+    }
+  }
+  return -1;
+}
+
+function popNext_(requester) {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_();
+    const rng = sh.getDataRange();
+    const data = rng.getValues();
+    const rowIdx = findNextRow_(data, CFG.STALE_MINUTES);
+    if (rowIdx < 0) return { done: true, message: 'Queue empty.' };
+
+    const sheetRow = rowIdx + 1; // 1-based with header
+    const fileId = data[rowIdx][0];
+    const fileName = data[rowIdx][1];
+
+    // claim it
+    sh.getRange(sheetRow, 3).setValue('claimed');        // status
+    sh.getRange(sheetRow, 4).setValue(requester);        // claimedBy
+    sh.getRange(sheetRow, 5).setValue(now_());           // claimedAt
+
+    const viewLink = 'https://drive.google.com/file/d/' + fileId + '/view';
+    const directLink = 'https://drive.google.com/uc?export=download&id=' + fileId;
+
+    return { done: false, fileId, fileName, viewLink, directLink, row: sheetRow };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function markDone_(fileId, requester) {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_();
+    const data = sh.getDataRange().getValues();
+    for (let r = 1; r < data.length; r++) {
+      if (data[r][0] === fileId && data[r][2] === 'claimed') {
+        // optional: ensure same user
+        sh.getRange(r + 1, 3).setValue('done');
+        sh.getRange(r + 1, 6).setValue(now_()); // doneAt
+        return { ok: true };
+      }
+    }
+    return { ok: false, message: 'Not found or not claimed.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function skip_(fileId, requester) {
+  // turn a claimed row back to unclaimed
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_();
+    const data = sh.getDataRange().getValues();
+    for (let r = 1; r < data.length; r++) {
+      if (data[r][0] === fileId && data[r][2] === 'claimed') {
+        sh.getRange(r + 1, 3, 1, 4).clearContent(); // status..doneAt
+        return { ok: true };
+      }
+    }
+    return { ok: false, message: 'Not found or not claimed.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/***** === WEB APP ENDPOINTS === *****/
+function doPost(e) {
+  const req = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
+
+  if (req.action === 'upload_tiles') {
+    if (req.baseName) {
+      if (Array.isArray(req.items)) {
+        const label_parent = DriveApp.getFolderById(CFG.FOLDER_STORE_LABEL_TILES)
+        const image_parent = DriveApp.getFolderById(CFG.FOLDER_STORE_IMAGE_TILES)
+
+        // Put outputs in a subfolder for cleanliness
+        // const label_sub = getOrMakeSubfolder_(label_parent);
+        // const image_sub = getOrMakeSubfolder_(image_parent);
+
+        // Each item: {i, png_b64, csv_b64, png_name?, csv_name?}
+        const out = [];
+        for (var k = 0; k < req.items.length; k++) {
+          var it = req.items[k];
+          var idx = it.i;
+          // PNG
+          var pngBytes = Utilities.base64Decode(it.png_b64);
+          var pngBlob  = Utilities.newBlob(pngBytes, 'image/png', it.png_name || (req.baseName + `_tile_${idx}.png`));
+          var pngFile  = image_parent.createFile(pngBlob);
+
+          // CSV (text)
+          var csvBytes = Utilities.base64Decode(it.csv_b64);
+          var csvBlob  = Utilities.newBlob(csvBytes, 'text/csv', it.csv_name || (req.baseName + `_tile_${idx}.csv`));
+          var csvFile  = label_parent.createFile(csvBlob);
+
+          out.push({ i: idx, pngId: pngFile.getId(), csvId: csvFile.getId() });
+        }
+        return json_({ ok: true });
+      } else {
+        return json_({ error: 'items not Array' })
+      }
+    } else {
+      return json_({ error: 'baseName incorrect' })
+    }
+  }
+
+  const me = (function(){ try { return Session.getActiveUser().getEmail() || 'anonymous'; } catch(e){ return 'anonymous'; } })();
+  if (req.action === 'next') return json_(popNext_(me));
+  if (req.action === 'done' && req.fileId) return json_(markDone_(req.fileId, me));
+  if (req.action === 'skip' && req.fileId) return json_(skip_(req.fileId, me));
+  
+  return json_({ error: 'Unknown action.' });
+}
+
+function json_(obj){
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet(e) {
+  if (e && e.parameter && e.parameter.raw) {
+    const file = DriveApp.getFileById(e.parameter.raw);
+    const blob = file.getBlob();
+    const b64 = Utilities.base64Encode(blob.getBytes());
+    return ContentService
+      .createTextOutput(b64)
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  return HtmlService.createHtmlOutput("OK");
+}
+
+function respond_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
