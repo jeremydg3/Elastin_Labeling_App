@@ -6,7 +6,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent
 
 # Define paths
-assets_dir = project_root / "assets"
+assets_dir = project_root / "ui" / "assets"
 ui_dir = project_root / "ui"
 viewer_script = ui_dir / "viewer.py"
 icon_path = assets_dir / "logo.png"
