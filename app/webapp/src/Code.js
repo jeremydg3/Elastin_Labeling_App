@@ -120,6 +120,36 @@ function popNext_(requester) {
   }
 }
 
+function popRandomTile_() {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const folder = DriveApp.getFolderById(CFG.FOLDER_STORE_IMAGE_TILES);
+    const files = folder.getFiles();
+    const fileList = [];
+    
+    while (files.hasNext()) {
+      fileList.push(files.next());
+    }
+    
+    if (fileList.length === 0) {
+      return { done: true, message: 'No tiles available.' };
+    }
+    
+    const randomIndex = Math.floor(Math.random() * fileList.length);
+    const randomFile = fileList[randomIndex];
+    const fileId = randomFile.getId();
+    const fileName = randomFile.getName();
+    
+    const viewLink = 'https://drive.google.com/file/d/' + fileId + '/view';
+    const directLink = 'https://drive.google.com/uc?export=download&id=' + fileId;
+    
+    return { done: false, fileId, fileName, viewLink, directLink };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function markDone_(fileId, requester) {
   const lock = LockService.getScriptLock();
   lock.tryLock(30000);
@@ -247,7 +277,7 @@ function doPost(e) {
   if (req.action === 'next') return json_(popNext_(me));
   if (req.action === 'done' && req.fileId) return json_(markDone_(req.fileId, me));
   if (req.action === 'skip' && req.fileId) return json_(skip_(req.fileId, me));
-
+  if (req.action === 'random_tile') return json_(popRandomTile_());
   return json_({ error: 'Unknown action.' });
 }
 
