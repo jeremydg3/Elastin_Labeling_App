@@ -3,27 +3,35 @@ const CFG = {
   FOLDER_ID: '1Ydw52sIeBbl-VT2ihATxiviR7sRaMgxA', // images live here
   FOLDER_STORE_LABEL_TILES: '1kUHYSn2D11seEPhUzHaSsASY81ruXKqd', // Folder to upload labeled tiles
   FOLDER_STORE_IMAGE_TILES: '1Ai6aaY3aYDO7n_uLwuEzR9JF7Vc6Y7qW', // Folder to upload image tiles
-  SHEET_NAME: 'Sheet1',              // tab name
+  IMAGE_SHEET: 'Sheet1',              // tab name
+  TILE_SHEET: 'Sheet2',
   STALE_MINUTES: 30                  // reclaim if older than this
 };
 
 /***** === HELPERS === *****/
-function sheet_() {
-  return SpreadsheetApp.getActive().getSheetByName(CFG.SHEET_NAME);
+function sheet_(sheet_ind = 1) {
+  if (sheet_ind == 2) {
+    return SpreadsheetApp.getActive().getSheetByName(CFG.TILE_SHEET);
+  } else {
+    return SpreadsheetApp.getActive().getSheetByName(CFG.IMAGE_SHEET);
+  }
 }
+
 function now_() { return new Date(); }
 function minutesAgo_(d) {
   return (now_().getTime() - new Date(d).getTime()) / 60000;
 }
+
 function email_() {
   // In Google Workspace, returns signed-in user email. Else may be blank.
-  try { return Session.getActiveUser().getEmail() || 'anonymous'; } catch(e) { return 'anonymous'; }
+  try { return Session.getActiveUser().getEmail() || 'anonymous'; } catch (e) { return 'anonymous'; }
 }
+
 function api(action, payload) {
   const me = email_();
-  if (action === 'next')     return popNext_(me);
-  if (action === 'done')     return payload && payload.fileId ? markDone_(payload.fileId, me) : { ok:false, message:'fileId required' };
-  if (action === 'skip')     return payload && payload.fileId ? skip_(payload.fileId, me) : { ok:false, message:'fileId required' };
+  if (action === 'next') return popNext_(me);
+  if (action === 'done') return payload && payload.fileId ? markDone_(payload.fileId, me) : { ok: false, message: 'fileId required' };
+  if (action === 'skip') return payload && payload.fileId ? skip_(payload.fileId, me) : { ok: false, message: 'fileId required' };
   return { error: 'Unknown action.' };
 }
 
@@ -66,7 +74,7 @@ function shuffleUnclaimed() {
   }
   const out = [header].concat(claimed).concat(unclaimed);
   sh.clearContents();
-  sh.getRange(1,1,out.length,out[0].length).setValues(out);
+  sh.getRange(1, 1, out.length, out[0].length).setValues(out);
 }
 
 /***** === CORE QUEUE OPS (atomic) === *****/
@@ -151,6 +159,46 @@ function skip_(fileId, requester) {
   }
 }
 
+function getLastTileIndexRow() {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_(2);
+    const data = sh.getDataRange().getValues();
+    let lastTileIndex = 0;
+    let row = 1;
+    for (let r = 1; r < data.length; r++) {
+      if (data[r][0] > lastTileIndex) {
+        lastTileIndex = data[r][0];
+      }
+      row = r;
+    }
+    return [lastTileIndex, row];
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function updateTileTracker(row, tile_mask_id, file_mask_fname, tile_img_id, tile_img_fname, annotatedBy) {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_(2);
+    sh.getRange(row, 1).setValue(`${row}`);
+    sh.getRange(row, 2).setValue(tile_mask_id);
+    sh.getRange(row, 3).setValue(file_mask_fname);
+    sh.getRange(row, 4).setValue(tile_img_id);
+    sh.getRange(row, 5).setValue(tile_img_fname);
+    sh.getRange(row, 6).setValue(annotatedBy);
+    sh.getRange(row, 7).setValue(now_());
+    return 1
+
+  } finally {
+    lock.releaseLock();
+    return 0
+  }
+}
+
 /***** === WEB APP ENDPOINTS === *****/
 function doPost(e) {
   const req = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
@@ -158,29 +206,33 @@ function doPost(e) {
   if (req.action === 'upload_tiles') {
     if (req.baseName) {
       if (Array.isArray(req.items)) {
-        const label_parent = DriveApp.getFolderById(CFG.FOLDER_STORE_LABEL_TILES)
-        const image_parent = DriveApp.getFolderById(CFG.FOLDER_STORE_IMAGE_TILES)
 
-        // Put outputs in a subfolder for cleanliness
-        // const label_sub = getOrMakeSubfolder_(label_parent);
-        // const image_sub = getOrMakeSubfolder_(image_parent);
+        const label_parent = DriveApp.getFolderById(CFG.FOLDER_STORE_LABEL_TILES);
+        const image_parent = DriveApp.getFolderById(CFG.FOLDER_STORE_IMAGE_TILES);
 
-        // Each item: {i, png_b64, csv_b64, png_name?, csv_name?}
-        const out = [];
+        // Get the last tile index from the sheet and update file name accordingly
+        // const out = [];
+        const [lastTileIndex, row] = getLastTileIndexRow();
         for (var k = 0; k < req.items.length; k++) {
           var it = req.items[k];
-          var idx = it.i;
+          // var idx = it.i;
           // PNG
           var pngBytes = Utilities.base64Decode(it.png_b64);
-          var pngBlob  = Utilities.newBlob(pngBytes, 'image/png', it.png_name || (req.baseName + `_tile_${idx}.png`));
-          var pngFile  = image_parent.createFile(pngBlob);
+          // var pngBlob  = Utilities.newBlob(pngBytes, 'image/png', it.png_name || (req.baseName + `_tile_${idx}.png`));
+          const pngFileName = (`image_${lastTileIndex + k + 1}.png`);
+          var pngBlob = Utilities.newBlob(pngBytes, 'image/png', pngFileName);
+          var pngFile = image_parent.createFile(pngBlob);
 
           // CSV (text)
           var csvBytes = Utilities.base64Decode(it.csv_b64);
-          var csvBlob  = Utilities.newBlob(csvBytes, 'text/csv', it.csv_name || (req.baseName + `_tile_${idx}.csv`));
-          var csvFile  = label_parent.createFile(csvBlob);
+          // var csvBlob  = Utilities.newBlob(csvBytes, 'text/csv', it.csv_name || (req.baseName + `_tile_${idx}.csv`));
+          const csvFileName = (`tile_${lastTileIndex + k + 1}.csv`);
+          var csvBlob = Utilities.newBlob(csvBytes, 'text/csv', csvFileName);
+          var csvFile = label_parent.createFile(csvBlob);
 
-          out.push({ i: idx, pngId: pngFile.getId(), csvId: csvFile.getId() });
+          // out.push({ i: idx, pngId: pngFile.getId(), csvId: csvFile.getId() });
+          success = updateTileTracker(row + k + 1, pngFile.getId(), pngFileName, csvFile.getId(), csvFileName, 'anonymous');
+
         }
         return json_({ ok: true });
       } else {
@@ -191,15 +243,15 @@ function doPost(e) {
     }
   }
 
-  const me = (function(){ try { return Session.getActiveUser().getEmail() || 'anonymous'; } catch(e){ return 'anonymous'; } })();
+  const me = (function () { try { return Session.getActiveUser().getEmail() || 'anonymous'; } catch (e) { return 'anonymous'; } })();
   if (req.action === 'next') return json_(popNext_(me));
   if (req.action === 'done' && req.fileId) return json_(markDone_(req.fileId, me));
   if (req.action === 'skip' && req.fileId) return json_(skip_(req.fileId, me));
-  
+
   return json_({ error: 'Unknown action.' });
 }
 
-function json_(obj){
+function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
