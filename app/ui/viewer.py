@@ -8,11 +8,13 @@ from typing import List, Any, Callable, Optional
 
 from tile_grid_view import TileBrowser
 from loading_animation import LoadingDialog
+from user_selection_dialog import show_user_selection_dialog
 from webapp_interface_funcs import (
     WEB_APP_URL,
     fetch_next_image,
     upload_tiles_batch,
     skip_image,
+    get_user_list,
 )
 
 basedir = os.path.dirname(__file__)
@@ -82,15 +84,65 @@ class MainWindow(QtWidgets.QWidget):
         self.tiles_np = []  # type: List[np.ndarray]  # tiles for current image
         self._bg_threads = []  # type: list[QtCore.QThread]
         self._bg_workers = []  # type: list[Worker]
+        self.user = None  # type: Optional[str]  # Selected username
 
         # --- wiring ---
         self.btnNext.clicked.connect(self.on_next)
         self.btnDone.clicked.connect(self.on_done)
         self.btnSkip.clicked.connect(self.on_skip)
         self._set_work_buttons_enabled(False)
+    
+    def show_user_selection(self):
+        """
+        Show user selection dialog on startup.
+        Returns True if user was selected, False if cancelled.
+        """
+        try:
+            # Show loading while fetching user list
+            loading = LoadingDialog(self, message="Loading user list...")
+            loading.show()
+            QtCore.QCoreApplication.processEvents()
+            
+            # Fetch user list from web app
+            usernames = get_user_list(self.web_app_url)
+            loading.close()
+            
+            # Extract usernames from the data
+            # Assuming users_data is a list of dicts with 'name' or 'username' field
+            # Adjust this based on actual API response structure
+            # if isinstance(users_data, list) and len(users_data) > 0:
+            #     # Try to extract username from dict, or use the item directly if it's a string
+            #     if isinstance(users_data[0], dict):
+            #         # Try common field names
+            #         usernames = []
+            #         for user in users_data:
+            #             username = user.get('username') or user.get('name') or user.get('user') or str(user)
+            #             usernames.append(username)
+            #     else:
+            #         usernames = [str(u) for u in users_data]
+            # else:
+            #     usernames = []
+            
+            # Show user selection dialog
+            selected_user = show_user_selection_dialog(usernames, self)
+            
+            if selected_user:
+                self.user = selected_user
+                self.setWindowTitle(f"Elastin Queue Tile Viewer - User: {self.user}")
+                return True
+            else:
+                # User cancelled - close the app
+                return False
+                
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error Loading Users",
+                f"Failed to load user list: {str(e)}\n\nPlease check your connection and try again."
+            )
+            return False
 
     # ------------------ Actions ------------------
-
     def on_next(self):
         # Clear current view immediately
         self.view.set_title("")
@@ -375,6 +427,12 @@ if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     app.setWindowIcon(QIcon(os.path.join(basedir, "assets", "logo.png")))
     w = MainWindow()
-    w.resize(1100, 800)
-    w.show()
-    sys.exit(app.exec())
+    
+    # Show user selection dialog before showing main window
+    if w.show_user_selection():
+        w.resize(1100, 800)
+        w.show()
+        sys.exit(app.exec())
+    else:
+        # User cancelled - exit app
+        sys.exit(0)

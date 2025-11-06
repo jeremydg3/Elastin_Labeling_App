@@ -175,7 +175,6 @@ def skip_image(file_id: str, web_app_url: str = WEB_APP_URL) -> None:
         requests.RequestException: If the request fails
     """
     requests.post(web_app_url, json={"action": "skip", "fileId": file_id}, timeout=30)
-    # Note: Original code didn't check response, keeping same behavior
 
 
 def mark_image_done(file_id: str, web_app_url: str = WEB_APP_URL) -> None:
@@ -190,3 +189,32 @@ def mark_image_done(file_id: str, web_app_url: str = WEB_APP_URL) -> None:
         requests.RequestException: If the request fails
     """
     requests.post(web_app_url, json={"action": "done", "fileId": file_id}, timeout=30)
+
+
+def get_user_list(web_app_url: str = WEB_APP_URL) -> list:
+    """
+    Retrieve the list of users from the web app.
+    
+    Args:
+        web_app_url: URL of the Google Apps Script web app 
+    Returns:
+        List of user dictionaries
+    """
+    r = requests.post(web_app_url, json={"action": "user_list"}, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    return data.get("users", [])
+
+
+def create_new_user(name: str, web_app_url: str = WEB_APP_URL) -> bool:
+    """
+    Create a new user in the web app.
+    
+    Args:
+        name: Name of the new user
+        web_app_url: URL of the Google Apps Script web app
+    """
+    r = requests.post(web_app_url, json={"action": "create_user", "name": name}, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    return data.get("ok", False)
