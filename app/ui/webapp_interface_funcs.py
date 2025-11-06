@@ -51,7 +51,7 @@ def encode_csv_b64(mask: np.ndarray) -> str:
     return base64.b64encode(text).decode("ascii")
 
 
-def fetch_next_image(web_app_url: str = WEB_APP_URL) -> Dict[str, Any]:
+def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anonymous") -> Dict[str, Any]:
     """
     Fetch the next image from the queue.
     
@@ -68,7 +68,7 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL) -> Dict[str, Any]:
         RuntimeError: If image processing fails
     """
     # Claim next image from queue
-    r = requests.post(web_app_url, json={"action": "next"}, timeout=60)
+    r = requests.post(web_app_url, json={"action": "next", "user": user}, timeout=60)
     r.raise_for_status()
     data = r.json()
     
@@ -98,6 +98,7 @@ def upload_tiles_batch(base_name: str,
                        masks: List[np.ndarray],
                        subfolder: Optional[str] = None,
                        orig_indices: Optional[List[int]] = None,
+                       author: Optional[str] = "anonymous",
                        web_app_url: str = WEB_APP_URL) -> Dict[str, Any]:
     """
     Upload tiles and masks to the web app in a single batch request.
@@ -128,13 +129,13 @@ def upload_tiles_batch(base_name: str,
             "i": i_orig,
             "png_b64": encode_png_b64(tiles_rgb[i]),
             "csv_b64": encode_csv_b64(masks[i]),
-            # optional custom names:
             "png_name": f"{base_name}_tile_{i_orig:04d}.png",
             "csv_name": f"{base_name}_tile_{i_orig:04d}.csv",
         })
 
     payload = {
         "action": "upload_tiles",
+        "author": author,
         "baseName": base_name,
         "subfolder": subfolder,
         "items": items,

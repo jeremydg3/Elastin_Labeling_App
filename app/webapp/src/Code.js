@@ -275,27 +275,22 @@ function doPost(e) {
         const image_parent = DriveApp.getFolderById(CFG.FOLDER_STORE_IMAGE_TILES);
 
         // Get the last tile index from the sheet and update file name accordingly
-        // const out = [];
         const [lastTileIndex, row] = getLastTileIndexRow();
         for (var k = 0; k < req.items.length; k++) {
           var it = req.items[k];
-          // var idx = it.i;
           // PNG
           var pngBytes = Utilities.base64Decode(it.png_b64);
-          // var pngBlob  = Utilities.newBlob(pngBytes, 'image/png', it.png_name || (req.baseName + `_tile_${idx}.png`));
           const pngFileName = (`image_${lastTileIndex + k + 1}.png`);
           var pngBlob = Utilities.newBlob(pngBytes, 'image/png', pngFileName);
           var pngFile = image_parent.createFile(pngBlob);
 
           // CSV (text)
           var csvBytes = Utilities.base64Decode(it.csv_b64);
-          // var csvBlob  = Utilities.newBlob(csvBytes, 'text/csv', it.csv_name || (req.baseName + `_tile_${idx}.csv`));
           const csvFileName = (`tile_${lastTileIndex + k + 1}.csv`);
           var csvBlob = Utilities.newBlob(csvBytes, 'text/csv', csvFileName);
           var csvFile = label_parent.createFile(csvBlob);
 
-          // out.push({ i: idx, pngId: pngFile.getId(), csvId: csvFile.getId() });
-          success = updateTileTracker(row + k + 1, pngFile.getId(), pngFileName, csvFile.getId(), csvFileName, 'anonymous');
+          success = updateTileTracker(row + k + 1, pngFile.getId(), pngFileName, csvFile.getId(), csvFileName, req.author || 'anonymous');
 
         }
         return json_({ ok: true });
@@ -308,7 +303,7 @@ function doPost(e) {
   }
 
   const me = (function () { try { return Session.getActiveUser().getEmail() || 'anonymous'; } catch (e) { return 'anonymous'; } })();
-  if (req.action === 'next') return json_(popNext_(me));
+  if (req.action === 'next') return json_(popNext_(req.user || me));
   if (req.action === 'done' && req.fileId) return json_(markDone_(req.fileId, me));
   if (req.action === 'skip' && req.fileId) return json_(skip_(req.fileId, me));
   if (req.action === 'random_tile') return json_(popRandomTile_());

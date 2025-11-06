@@ -107,22 +107,6 @@ class MainWindow(QtWidgets.QWidget):
             usernames = get_user_list(self.web_app_url)
             loading.close()
             
-            # Extract usernames from the data
-            # Assuming users_data is a list of dicts with 'name' or 'username' field
-            # Adjust this based on actual API response structure
-            # if isinstance(users_data, list) and len(users_data) > 0:
-            #     # Try to extract username from dict, or use the item directly if it's a string
-            #     if isinstance(users_data[0], dict):
-            #         # Try common field names
-            #         usernames = []
-            #         for user in users_data:
-            #             username = user.get('username') or user.get('name') or user.get('user') or str(user)
-            #             usernames.append(username)
-            #     else:
-            #         usernames = [str(u) for u in users_data]
-            # else:
-            #     usernames = []
-            
             # Show user selection dialog
             selected_user = show_user_selection_dialog(usernames, self)
             
@@ -153,7 +137,7 @@ class MainWindow(QtWidgets.QWidget):
 
         def _task_fetch():
             # Use webapp interface function
-            result = fetch_next_image(self.web_app_url)
+            result = fetch_next_image(self.web_app_url, user=self.user)
             
             if result.get("done"):
                 return result
@@ -214,7 +198,8 @@ class MainWindow(QtWidgets.QWidget):
                                tiles_rgb=tiles_to_upload,
                                masks=masks_to_upload,
                                subfolder=f"{self.image_title} - annotated",
-                               orig_indices=completed_idxs)
+                               orig_indices=completed_idxs,
+                               author=self.user,)
             return {"count": len(tiles_to_upload)}
 
         def _on_uploaded(_res):
