@@ -5,6 +5,7 @@ const CFG = {
   FOLDER_STORE_IMAGE_TILES: '1Ai6aaY3aYDO7n_uLwuEzR9JF7Vc6Y7qW', // Folder to upload image tiles
   IMAGE_SHEET: 'Sheet1',              // tab name
   TILE_SHEET: 'Sheet2',
+  USER_SHEET: 'Sheet3',
   STALE_MINUTES: 30                  // reclaim if older than this
 };
 
@@ -12,6 +13,8 @@ const CFG = {
 function sheet_(sheet_ind = 1) {
   if (sheet_ind == 2) {
     return SpreadsheetApp.getActive().getSheetByName(CFG.TILE_SHEET);
+  } else if (sheet_ind == 3) {
+    return SpreadsheetApp.getActive().getSheetByName(CFG.USER_SHEET);
   } else {
     return SpreadsheetApp.getActive().getSheetByName(CFG.IMAGE_SHEET);
   }
@@ -209,6 +212,38 @@ function getLastTileIndexRow() {
   }
 }
 
+function getUserList() {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_(3);
+    const data = sh.getDataRange().getValues();
+    const users = [];
+    for (let r = 1; r < data.length; r++) {
+      if (data[r][0]) {
+        users.push(data[r][0]);
+      }
+    }
+    return users;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function createNewUser(name) {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_(3);
+    const lastRow = sh.getLastRow();
+    sh.getRange(lastRow + 1, 1).setValue(name);
+    return true;
+  } finally {
+    lock.releaseLock();
+    return false;
+  }
+}
+
 function updateTileTracker(row, tile_mask_id, file_mask_fname, tile_img_id, tile_img_fname, annotatedBy) {
   const lock = LockService.getScriptLock();
   lock.tryLock(30000);
@@ -278,6 +313,8 @@ function doPost(e) {
   if (req.action === 'done' && req.fileId) return json_(markDone_(req.fileId, me));
   if (req.action === 'skip' && req.fileId) return json_(skip_(req.fileId, me));
   if (req.action === 'random_tile') return json_(popRandomTile_());
+  if (req.action === 'user_list') return json_(getUserList());
+  if (req.action === 'create_user' && req.name) return json_({ ok: createNewUser(req.name) });
   return json_({ error: 'Unknown action.' });
 }
 
