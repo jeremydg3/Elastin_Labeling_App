@@ -237,10 +237,9 @@ function createNewUser(name) {
     const sh = sheet_(3);
     const lastRow = sh.getLastRow();
     sh.getRange(lastRow + 1, 1).setValue(name);
-    return true;
+    return { ok: true };
   } finally {
     lock.releaseLock();
-    return false;
   }
 }
 
@@ -313,8 +312,8 @@ function doPost(e) {
   if (req.action === 'done' && req.fileId) return json_(markDone_(req.fileId, me));
   if (req.action === 'skip' && req.fileId) return json_(skip_(req.fileId, me));
   if (req.action === 'random_tile') return json_(popRandomTile_());
-  if (req.action === 'user_list') return json_(getUserList());
-  if (req.action === 'create_user' && req.name) return json_({ ok: createNewUser(req.name) });
+  if (req.action === 'user_list') return json_({ users: getUserList() });
+  if (req.action === 'create_user' && req.name) return json_(createNewUser(req.name));
   return json_({ error: 'Unknown action.' });
 }
 
