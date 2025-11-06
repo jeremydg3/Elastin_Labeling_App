@@ -272,6 +272,17 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._brush_radius = brush_radius
         self._active_group = -1
         self._painting = False
+        # Undo/redo state (only for paint/erase actions)
+        self._undo_stack = []              # list of change dicts
+        self._redo_stack = []              # list of change dicts
+        self._stroke_record = None         # dict: lin_idx -> [old, new]
+        self._max_history = 50
+
+        # Shortcuts: Ctrl+Z (undo), Ctrl+Y (redo)
+        self._sc_undo = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Z'), self)
+        self._sc_undo.activated.connect(self.undo)
+        self._sc_redo = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Y'), self)
+        self._sc_redo.activated.connect(self.redo)
 
     # ---- public API ----
     def set_eraser(self, active: bool):
@@ -326,12 +337,31 @@ class TileDetailView(QtWidgets.QGraphicsView):
         dx = xx - x; dy = yy - y
         circle = (dx*dx + dy*dy) <= rr2
 
-        if self._eraser:
-            # self._mask[ymin:ymax+1, xmin:xmax+1][circle] = np.uint8(255)   # erase
-            sub[circle] = np.uint8(255)  
-        else:
-            # self._mask[ymin:ymax+1, xmin:xmax+1][circle] = np.uint8(self._active_group)
-            sub[circle] = np.uint8(self._active_group)
+        # Determine target value and track changed pixels for undo/redo
+        target_val: np.uint8 = np.uint8(255) if self._eraser else np.uint8(self._active_group)
+        # Pixels that will actually change with this dab
+        change_mask = circle & (sub != target_val)
+
+        # Record old/new values for this stroke (only once per pixel)
+        if self._painting and self._stroke_record is not None and np.any(change_mask):
+            cy, cx = np.where(change_mask)
+            ys = (ymin + cy).astype(np.int64)
+            xs = (xmin + cx).astype(np.int64)
+            old_vals = sub[cy, cx].astype(np.uint8)
+            w_full = self._mask.shape[1]
+            lin = (ys * w_full + xs).astype(np.int64)
+            # Store first-seen old value; always update final new value
+            for i in range(lin.size):
+                key = int(lin[i])
+                prev = self._stroke_record.get(key)
+                if prev is None:
+                    # [old, new]
+                    self._stroke_record[key] = [int(old_vals[i]), int(target_val)]
+                else:
+                    prev[1] = int(target_val)
+
+        # Apply paint/erase to the subregion
+        sub[change_mask] = target_val
 
         self._mask[ymin:ymax+1, xmin:xmax+1] = sub          # <-- write back
         self._rebuild_overlay()
@@ -366,6 +396,10 @@ class TileDetailView(QtWidgets.QGraphicsView):
         if self._base_item is not None:
             scene.setSceneRect(self._base_item.boundingRect())
         self.fitInView(self.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+        # Reset history for new base pixmap
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._stroke_record = None
 
     def set_mask(self, mask: np.ndarray | None):
         """mask: uint8 HxW, values {0..9, 255}, or None -> create empty"""
@@ -379,6 +413,10 @@ class TileDetailView(QtWidgets.QGraphicsView):
             assert mask.shape == (h, w) and mask.dtype == np.uint8
             self._mask = mask.copy()
         self._rebuild_overlay()
+        # Reset history when mask is set/switched
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._stroke_record = None
 
     def get_mask(self):
         return None if self._mask is None else self._mask.copy()
@@ -429,6 +467,9 @@ class TileDetailView(QtWidgets.QGraphicsView):
 
             # begin stroke + lay down initial dab
             self._painting = True
+            # Begin new stroke record and clear redo chain
+            self._stroke_record = {}
+            self._redo_stack.clear()
             self._paint_at(x, y)   # uses cv2.circle(...) inside
             e.accept()
             return
@@ -465,6 +506,21 @@ class TileDetailView(QtWidgets.QGraphicsView):
     def mouseReleaseEvent(self, e: QtGui.QMouseEvent):
         if e.button() == QtCore.Qt.MouseButton.LeftButton and self._painting:
             self._painting = False
+            # Finalize stroke: push to undo stack if any changes
+            if self._stroke_record is not None and len(self._stroke_record) > 0:
+                w_full = self._mask.shape[1] if self._mask is not None else 0
+                keys = list(self._stroke_record.keys())
+                ys = np.array([k // w_full for k in keys], dtype=np.int32)
+                xs = np.array([k % w_full for k in keys], dtype=np.int32)
+                olds = np.array([self._stroke_record[k][0] for k in keys], dtype=np.uint8)
+                news = np.array([self._stroke_record[k][1] for k in keys], dtype=np.uint8)
+                change = {"ys": ys, "xs": xs, "old": olds, "new": news}
+                self._undo_stack.append(change)
+                # cap history
+                if len(self._undo_stack) > self._max_history:
+                    self._undo_stack.pop(0)
+            # clear current stroke record
+            self._stroke_record = None
             e.accept()
             return
         
@@ -478,6 +534,12 @@ class TileDetailView(QtWidgets.QGraphicsView):
 
     # optional: +/− to change brush size
     def keyPressEvent(self, e: QtGui.QKeyEvent):
+        # Undo/Redo shortcuts (in addition to explicit QShortcuts)
+        if e.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+            if e.key() == QtCore.Qt.Key.Key_Z:
+                self.undo(); e.accept(); return
+            if e.key() == QtCore.Qt.Key.Key_Y:
+                self.redo(); e.accept(); return
         if e.key() in (QtCore.Qt.Key.Key_Plus, QtCore.Qt.Key.Key_Equal):
             self._brush_radius = min(128, self._brush_radius + 1)
             # Update cursor size immediately
@@ -499,6 +561,33 @@ class TileDetailView(QtWidgets.QGraphicsView):
     def wheelEvent(self, event: QtGui.QWheelEvent):
         factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
         self.scale(factor, factor)
+
+    # ---- undo/redo API ----
+    def undo(self):
+        if self._painting:
+            return  # don't undo mid-stroke
+        if self._mask is None or len(self._undo_stack) == 0:
+            return
+        change = self._undo_stack.pop()
+        ys = change["ys"]; xs = change["xs"]; old = change["old"]
+        self._mask[ys, xs] = old
+        self._rebuild_overlay()
+        self.maskChanged.emit()
+        # push to redo
+        self._redo_stack.append(change)
+
+    def redo(self):
+        if self._painting:
+            return  # don't redo mid-stroke
+        if self._mask is None or len(self._redo_stack) == 0:
+            return
+        change = self._redo_stack.pop()
+        ys = change["ys"]; xs = change["xs"]; newv = change["new"]
+        self._mask[ys, xs] = newv
+        self._rebuild_overlay()
+        self.maskChanged.emit()
+        # push back to undo
+        self._undo_stack.append(change)
 
 
 class TileBrowser(QtWidgets.QWidget):
