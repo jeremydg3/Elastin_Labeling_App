@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 from PyQt6 import QtWidgets, QtGui, QtCore
 from group_bar import GROUP_COLORS, GroupBar
 import os
+import cv2
 
 basedir = os.path.dirname(__file__)
 
@@ -267,6 +268,11 @@ class TileDetailView(QtWidgets.QGraphicsView):
             scene.addItem(self._cursor_item)
 
         self._pix = None
+        self._pix_rgb = None   # Store original RGB pixmap
+        self._pix_hsv_value = None  # Cache HSV value channel pixmap
+        self._show_v = False  # Toggle state for RGB vs HSV Value display
+        self._show_h = False  # Toggle state for RGB vs HSV Hue display
+        self._show_s = False  # Toggle state for RGB vs HSV Saturation display
         self._mask = None  # uint8 HxW (0..9, 255 empty)
         self._overlay_pm = None
         self._brush_radius = brush_radius
@@ -379,9 +385,15 @@ class TileDetailView(QtWidgets.QGraphicsView):
             scene = QtWidgets.QGraphicsScene(self)
             self.setScene(scene)
         
+        # Store original RGB pixmap and reset display state
+        self._pix_rgb = pix
+        self._pix = pix
+        self._pix_hsv_value = None  # Clear cached HSV
+        self._show_h = False  # Always start with RGB view
+        self._show_s = False  # Always start with RGB view
+        self._show_v = False  # Always start with RGB view
         self._base_item = scene.addPixmap(pix)
         # self._base_item.setZValue(0)
-        self._pix = pix
 
         # overlay
         self._overlay_pm = QtGui.QPixmap(pix.size())
@@ -420,6 +432,125 @@ class TileDetailView(QtWidgets.QGraphicsView):
 
     def get_mask(self):
         return None if self._mask is None else self._mask.copy()
+
+    def _pixmap_to_hsv_value(self, pixmap: QtGui.QPixmap, channel: str) -> QtGui.QPixmap:
+        """Convert a QPixmap to HSV and extract the specified channel as grayscale."""
+        assert channel in ('value', 'hue', 'saturation')
+
+        # Convert QPixmap to QImage in RGB888 format
+        qimg = pixmap.toImage().convertToFormat(QtGui.QImage.Format.Format_RGB888)
+        
+        # Convert to numpy array
+        width = qimg.width()
+        height = qimg.height()
+        bytes_per_line = qimg.bytesPerLine()
+        ptr = qimg.constBits()
+        
+        # Create numpy array from image data
+        try:
+            arr = np.array(ptr, copy=True).reshape((height, bytes_per_line))
+        except Exception as e:
+            # Fallback method if direct array conversion fails
+            if ptr is not None:
+                try:
+                    data_string = ptr.asstring(qimg.sizeInBytes())
+                    arr = np.frombuffer(data_string,dtype=np.uint8).reshape((height,bytes_per_line))
+                except Exception as e2:
+                    # raise RuntimeError("Failed to convert QPixmap to numpy array") from e2
+                    return pixmap  # Fallback: return original pixmap
+            else:
+                return pixmap  # Fallback: return original pixmap
+        
+        # Extract only the RGB data (3 bytes per pixel)
+        rgb = arr[:, :width*3].reshape((height, width, 3)).copy()
+        
+        # Convert RGB to HSV using OpenCV
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+        
+        # Extract Value channel
+        if channel == 'hue':
+            value = hsv[:, :, 0]
+        elif channel == 'saturation':
+            value = hsv[:, :, 1]
+        else:  # channel == 'value'
+            value = hsv[:, :, 2]
+
+        # Convert to RGB grayscale (all channels same)
+        viridis_rgb = self.viridis_colormap(value)
+        
+        # Convert back to QPixmap
+        return np_to_qpixmap(viridis_rgb)
+
+    @staticmethod
+    def viridis_colormap(grey: np.ndarray) -> np.ndarray:
+        # Apply viridis colormap to the channel
+        # Normalize to 0-1 range first
+        normalized = grey.astype(np.float32) / 255.0
+        
+        # Apply viridis colormap (matplotlib-style)
+        # Viridis color points: dark purple -> blue -> green -> yellow
+        viridis_colors = np.array([
+            [0.267004, 0.004874, 0.329415],  # dark purple
+            [0.253935, 0.265254, 0.529983],  # blue
+            [0.163625, 0.471133, 0.558148],  # teal
+            [0.134692, 0.658636, 0.517649],  # green
+            [0.477504, 0.821444, 0.318465],  # light green
+            [0.993248, 0.906157, 0.143936]   # yellow
+        ])
+        
+        # Interpolate colors based on normalized values
+        n_colors = len(viridis_colors)
+        indices = normalized * (n_colors - 1)
+        indices_int = np.floor(indices).astype(np.int32)
+        indices_frac = indices - indices_int
+        indices_int = np.clip(indices_int, 0, n_colors - 2)
+        
+        # Linear interpolation between adjacent colors
+        color1 = viridis_colors[indices_int]
+        color2 = viridis_colors[indices_int + 1]
+        interpolated = color1 + indices_frac[..., np.newaxis] * (color2 - color1)
+        
+        # Convert to uint8 RGB
+        viridis_rgb = (interpolated * 255).astype(np.uint8)
+        return viridis_rgb
+
+    def toggle_hsv_display(self, channel: str):
+        """Toggle between RGB and HSV Value channel display."""
+        assert channel in ('value', 'hue', 'saturation')
+
+        if self._pix_rgb is None or self._base_item is None:
+            return
+        
+        if channel == 'value':
+            self._show_v = not self._show_v
+            self._show_h = False
+            self._show_s = False
+        elif channel == 'hue':
+            self._show_h = not self._show_h
+            self._show_v = False
+            self._show_s = False
+        elif channel == 'saturation':
+            self._show_s = not self._show_s
+            self._show_h = False
+            self._show_v = False
+        else:
+            return  # invalid channel
+        
+        if self._show_v or self._show_h or self._show_s:
+            if self._show_v:
+                # Switch to HSV Value display
+                self._pix_hsv_value = self._pixmap_to_hsv_value(self._pix_rgb, 'value')
+            elif self._show_h:
+                # Switch to HSV Hue display
+                self._pix_hsv_value = self._pixmap_to_hsv_value(self._pix_rgb, 'hue')
+            else:  # self._show_s:
+                # Switch to HSV Saturation display
+                self._pix_hsv_value = self._pixmap_to_hsv_value(self._pix_rgb, 'saturation')
+            self._base_item.setPixmap(self._pix_hsv_value)
+        else:
+            # Switch back to RGB
+            self._pix_hsv_value = None
+            self._base_item.setPixmap(self._pix_rgb)
 
     # ---- overlay composition ----
     def _rebuild_overlay(self):
@@ -532,7 +663,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         
         super().mouseReleaseEvent(e)
 
-    # optional: +/− to change brush size
+
     def keyPressEvent(self, e: QtGui.QKeyEvent):
         # Undo/Redo shortcuts (in addition to explicit QShortcuts)
         if e.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
@@ -540,6 +671,22 @@ class TileDetailView(QtWidgets.QGraphicsView):
                 self.undo(); e.accept(); return
             if e.key() == QtCore.Qt.Key.Key_Y:
                 self.redo(); e.accept(); return
+        # Toggle HSV Value display with 'V' key
+        if e.key() == QtCore.Qt.Key.Key_V:
+            self.toggle_hsv_display("value")
+            e.accept(); return
+        # Toggle HSV Hue display with 'H' key
+        if e.key() == QtCore.Qt.Key.Key_H:
+            self.toggle_hsv_display("hue")
+            e.accept(); return
+        # Toggle HSV Saturation display with 'S' key
+        if e.key() == QtCore.Qt.Key.Key_S:
+            self.toggle_hsv_display("saturation")
+            e.accept(); return
+        # Clear mask with 'C' key
+        if e.key() == QtCore.Qt.Key.Key_C:
+            self.set_mask(None)
+            e.accept(); return
         if e.key() in (QtCore.Qt.Key.Key_Plus, QtCore.Qt.Key.Key_Equal):
             self._brush_radius = min(128, self._brush_radius + 1)
             # Update cursor size immediately
