@@ -44,11 +44,28 @@ function initQueueFromFolder() {
   const sh = sheet_();
   const folder = DriveApp.getFolderById(CFG.FOLDER_ID);
   const files = folder.getFiles();
+  
+  // Get existing file IDs and names
+  const existingData = sh.getDataRange().getValues();
+  const existingFileIds = new Set();
+  const existingFileNames = new Set();
+  for (let r = 1; r < existingData.length; r++) {
+    if (existingData[r][0]) existingFileIds.add(existingData[r][0]);
+    if (existingData[r][1]) existingFileNames.add(existingData[r][1]);
+  }
+  
   const rows = [];
   while (files.hasNext()) {
     const f = files.next();
-    rows.push([f.getId(), f.getName(), '', '', '', '']);
+    const fileId = f.getId();
+    const fileName = f.getName();
+    
+    // Only add if both ID and name don't already exist
+    if (!existingFileIds.has(fileId) && !existingFileNames.has(fileName)) {
+      rows.push([fileId, fileName, '', '', '', '']);
+    }
   }
+  
   if (rows.length) {
     sh.getRange(sh.getLastRow() + 1, 1, rows.length, 6).setValues(rows);
   }
