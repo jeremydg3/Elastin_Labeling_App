@@ -96,7 +96,7 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
 def upload_tiles_batch(base_name: str,
                        tiles_rgb: List[np.ndarray],
                        masks: List[np.ndarray],
-                       subfolder: Optional[str] = None,
+                       source_img_fname: Optional[str] = None,
                        orig_indices: Optional[List[int]] = None,
                        author: Optional[str] = "anonymous",
                        web_app_url: str = WEB_APP_URL) -> Dict[str, Any]:
@@ -107,7 +107,7 @@ def upload_tiles_batch(base_name: str,
         base_name: Base name for the files (image title)
         tiles_rgb: List of RGB tile arrays
         masks: List of mask arrays (same length as tiles_rgb)
-        subfolder: Optional subfolder name for organizing uploads
+        source_img_fname: Optional source image filename for reference
         orig_indices: Optional list of original tile indices for naming
         web_app_url: URL of the Google Apps Script web app
     
@@ -137,7 +137,7 @@ def upload_tiles_batch(base_name: str,
         "action": "upload_tiles",
         "author": author,
         "baseName": base_name,
-        "subfolder": subfolder,
+        "source_img_fname": source_img_fname,
         "items": items,
     }
     

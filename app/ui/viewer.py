@@ -199,7 +199,7 @@ class MainWindow(QtWidgets.QWidget):
             upload_tiles_batch(base_name=self.image_title.replace(" ", "_"),
                                tiles_rgb=tiles_to_upload,
                                masks=masks_to_upload,
-                               subfolder=f"{self.image_title} - annotated",
+                               source_img_fname=f"{self.image_title}",
                                orig_indices=completed_idxs,
                                author=self.user,)
             return {"count": len(tiles_to_upload)}

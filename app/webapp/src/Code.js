@@ -260,23 +260,24 @@ function createNewUser(name) {
   }
 }
 
-function updateTileTracker(row, tile_mask_id, file_mask_fname, tile_img_id, tile_img_fname, annotatedBy) {
+function updateTileTracker(row, source_img_fname, tile_mask_id, file_mask_fname, tile_img_id, tile_img_fname, annotatedBy) {
   const lock = LockService.getScriptLock();
   lock.tryLock(30000);
   try {
     const sh = sheet_(2);
     sh.getRange(row, 1).setValue(`${row}`);
-    sh.getRange(row, 2).setValue(tile_mask_id);
-    sh.getRange(row, 3).setValue(file_mask_fname);
-    sh.getRange(row, 4).setValue(tile_img_id);
-    sh.getRange(row, 5).setValue(tile_img_fname);
-    sh.getRange(row, 6).setValue(annotatedBy);
-    sh.getRange(row, 7).setValue(now_());
-    return 1
+    sh.getRange(row, 2).setValue(source_img_fname);
+    sh.getRange(row, 3).setValue(tile_mask_id);
+    sh.getRange(row, 4).setValue(file_mask_fname);
+    sh.getRange(row, 5).setValue(tile_img_id);
+    sh.getRange(row, 6).setValue(tile_img_fname);
+    sh.getRange(row, 7).setValue(annotatedBy);
+    sh.getRange(row, 8).setValue(now_());
+    return 1;
 
   } finally {
     lock.releaseLock();
-    return 0
+    return 0;
   }
 }
 
@@ -294,6 +295,28 @@ function clean_exit(fileId, requester) {
       }
 
     }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function clearStaleClaims() {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_(1);
+    const data = sh.getDataRange().getValues();
+    
+    for (let r = 1; r < data.length; r++) {
+      const status = data[r][2]; // Column C (status)
+      const doneAt = data[r][5]; // Column F (doneAt)
+      
+      if (status === 'claimed' && !doneAt) {
+        sh.getRange(r + 1, 3, 1, 4).clearContent(); // Clear columns C-F
+      }
+    }
+    
+    return { ok: true };
   } finally {
     lock.releaseLock();
   }
@@ -326,7 +349,7 @@ function doPost(e) {
           var csvBlob = Utilities.newBlob(csvBytes, 'text/csv', csvFileName);
           var csvFile = label_parent.createFile(csvBlob);
 
-          success = updateTileTracker(row + k + 1, pngFile.getId(), pngFileName, csvFile.getId(), csvFileName, req.author || 'anonymous');
+          success = updateTileTracker(row + k + 1, req.source_img_fname, pngFile.getId(), pngFileName, csvFile.getId(), csvFileName, req.author || 'anonymous');
 
         }
         return json_({ ok: true });
