@@ -1,12 +1,12 @@
-import sys, io, os
+import sys, os
 import numpy as np
 import cv2
-from PyQt6 import QtWidgets, QtGui, QtCore
+from PyQt6 import QtWidgets, QtCore
 from PyQt6.QtGui import QIcon
 import math
 from typing import List, Any, Callable, Optional
 
-from tile_grid_view import TileBrowser
+from tile_browser import TileBrowser
 from loading_animation import LoadingDialog
 from user_selection_dialog import show_user_selection_dialog
 from webapp_interface_funcs import (
