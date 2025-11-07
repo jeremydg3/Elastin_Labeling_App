@@ -207,6 +207,19 @@ def get_user_list(web_app_url: str = WEB_APP_URL) -> list:
     return data.get("users", [])
 
 
+def clean_exit(web_app_url: str = WEB_APP_URL, file_id: str = None) -> None:
+    """
+    Notify the web app of a clean exit.
+    
+    Args:
+        web_app_url: URL of the Google Apps Script web app
+    """
+    try:
+        requests.post(web_app_url, json={"action": "clean_exit", "fileId": file_id}, timeout=10)
+    except requests.RequestException:
+        pass  # Ignore errors on exit
+
+
 def create_new_user(name: str, web_app_url: str = WEB_APP_URL) -> bool:
     """
     Create a new user in the web app.

@@ -7,6 +7,8 @@ from utils import np_to_qpixmap
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 
+MAX_HISTORY = 50
+
 class TileDetailView(QtWidgets.QGraphicsView):
     """
     Shows one tile pixmap + a paintable overlay mask.
@@ -56,7 +58,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._undo_stack = []              # list of change dicts
         self._redo_stack = []              # list of change dicts
         self._stroke_record = None         # dict: lin_idx -> [old, new]
-        self._max_history = 50
+        self._max_history = MAX_HISTORY
 
         # Shortcuts: Ctrl+Z (undo), Ctrl+Y (redo)
         self._sc_undo = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Z'), self)
@@ -480,6 +482,39 @@ class TileDetailView(QtWidgets.QGraphicsView):
         super().keyPressEvent(e)
 
     def wheelEvent(self, event: QtGui.QWheelEvent):
+        # If Ctrl is held, use wheel to change brush size instead of zooming
+        try:
+            modifiers = event.modifiers()
+        except Exception:
+            modifiers = QtCore.Qt.KeyboardModifier.NoModifier
+
+        if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
+            if self._eraser or self._active_group >= 0:
+                # angleDelta().y() is positive for wheel-up, negative for wheel-down
+                delta = event.angleDelta().y()
+                if delta == 0:
+                    event.ignore()
+                    return
+                # Prefer whole-notch steps if available (120 units per notch typical)
+                steps = int(delta / 120)
+                sign = 1 if delta > 0 else -1
+                if steps == 0:
+                    steps = sign
+
+                # Adjust brush radius, clamp between 1 and 128
+                self._brush_radius = max(1, min(128, int(self._brush_radius) + steps))
+
+                # Update cursor size immediately if visible
+                if self._cursor_item.isVisible():
+                    rect = self._cursor_item.rect()
+                    x, y = rect.center().x(), rect.center().y()
+                    r = self._brush_radius
+                    self._cursor_item.setRect(x - r, y - r, 2*r, 2*r)
+
+                event.accept()
+                return
+
+        # Default: zoom view
         factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
         self.scale(factor, factor)
 

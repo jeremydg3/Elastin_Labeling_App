@@ -1,7 +1,7 @@
 import sys, os
 import numpy as np
 import cv2
-from PyQt6 import QtWidgets, QtCore
+from PyQt6 import QtWidgets, QtCore, QtGui
 from PyQt6.QtGui import QIcon
 import math
 from typing import List, Any, Callable, Optional
@@ -15,6 +15,8 @@ from webapp_interface_funcs import (
     upload_tiles_batch,
     skip_image,
     get_user_list,
+    mark_image_done,
+    clean_exit
 )
 
 basedir = os.path.dirname(__file__)
@@ -203,8 +205,10 @@ class MainWindow(QtWidgets.QWidget):
             return {"count": len(tiles_to_upload)}
 
         def _on_uploaded(_res):
+            self.mark_done()
             self.on_next()
 
+        # Run upload in background thread
         self._run_in_thread(_task_upload, on_result=_on_uploaded, on_error=self._show_error)
 
 
@@ -225,6 +229,20 @@ class MainWindow(QtWidgets.QWidget):
 
         self._run_in_thread(_task_skip, on_result=_on_skipped, on_error=self._show_error)
 
+    def mark_done(self):
+        if not self.current:
+            return
+        file_id = self.current["fileId"]
+        mark_image_done(file_id, self.web_app_url)
+        self.current = None
+        self._set_work_buttons_enabled(False)
+
+    def closeEvent(self, event: QtGui.QCloseEvent):
+        def _task_clean_exit():
+            clean_exit(self.web_app_url,file_id = self.current["fileId"])
+        if self.current:
+            self._run_in_thread(_task_clean_exit)
+        event.accept()
 
     # def upload_file_to_queue(self, path: str):
     #     with open(path, "rb") as f:

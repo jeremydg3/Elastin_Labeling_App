@@ -263,6 +263,25 @@ function updateTileTracker(row, tile_mask_id, file_mask_fname, tile_img_id, tile
   }
 }
 
+function clean_exit(fileId, requester) {
+  // turn a claimed row back to unclaimed
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_();
+    const data = sh.getDataRange().getValues();
+    for (let r = 1; r < data.length; r++) {
+      if (data[r][0] === fileId && data[r][2] === 'claimed') {
+        sh.getRange(r + 1, 3, 1, 4).clearContent(); // status..doneAt
+        return { ok: true };
+      }
+
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /***** === WEB APP ENDPOINTS === *****/
 function doPost(e) {
   const req = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
@@ -309,6 +328,7 @@ function doPost(e) {
   if (req.action === 'random_tile') return json_(popRandomTile_());
   if (req.action === 'user_list') return json_({ users: getUserList() });
   if (req.action === 'create_user' && req.name) return json_(createNewUser(req.name));
+  if (req.action === 'clean_exit' && req.fileId) return json_(clean_exit(req.fileId, me));
   return json_({ error: 'Unknown action.' });
 }
 
