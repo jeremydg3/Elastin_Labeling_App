@@ -105,19 +105,42 @@ class TileGridView(QGraphicsView):
 
 
     def _on_item_context(self, idx: int, global_pt: QPoint):
-        # Build a simple context menu to toggle completion
+        # Build a context menu with 3 mutually exclusive states
         menu = QMenu()
         is_completed = idx in getattr(self, "_completed_set", set())
         is_working = idx in getattr(self, "_working_set", set())
 
-        act_toggle_complete = menu.addAction("Unmark Complete" if is_completed else "✓ Mark Complete")
-        act_toggle_working = menu.addAction("Unmark Working" if is_working else "⧗ Mark Working")
-
-        chosen = menu.exec(global_pt)
-        if chosen == act_toggle_complete:
-            self.toggleComplete.emit(idx)
-        elif chosen == act_toggle_working:
-            self.toggleWorking.emit(idx)
+        # Show options based on current state (3 mutually exclusive states)
+        if is_completed:
+            # Currently completed -> offer to mark working or clear
+            act_mark_working = menu.addAction("⧗ Mark Working")
+            act_clear = menu.addAction("Clear Status")
+            
+            chosen = menu.exec(global_pt)
+            if chosen == act_mark_working:
+                self.toggleWorking.emit(idx)
+            elif chosen == act_clear:
+                self.toggleComplete.emit(idx)  # Remove completed status
+        elif is_working:
+            # Currently working -> offer to mark complete or clear
+            act_mark_complete = menu.addAction("✓ Mark Complete")
+            act_clear = menu.addAction("Clear Status")
+            
+            chosen = menu.exec(global_pt)
+            if chosen == act_mark_complete:
+                self.toggleComplete.emit(idx)
+            elif chosen == act_clear:
+                self.toggleWorking.emit(idx)  # Remove working status
+        else:
+            # Currently neither -> offer both options
+            act_mark_complete = menu.addAction("✓ Mark Complete")
+            act_mark_working = menu.addAction("⧗ Mark Working")
+            
+            chosen = menu.exec(global_pt)
+            if chosen == act_mark_complete:
+                self.toggleComplete.emit(idx)
+            elif chosen == act_mark_working:
+                self.toggleWorking.emit(idx)
 
 
     def _fit_scene(self):

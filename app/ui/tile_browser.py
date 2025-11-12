@@ -257,30 +257,46 @@ class TileBrowser(QWidget):
 
 
     def _on_grid_toggle_complete(self, idx: int):
-        # Toggle in the browser's source-of-truth set, then push to grid
+        # Toggle completion in the browser's source-of-truth set
+        # States are mutually exclusive: completed, working, or neither
         if idx in self._completed:
+            # Already completed -> remove (clear status)
             self._completed.remove(idx)
         else:
+            # Mark as completed and remove from working if present
             self._completed.add(idx)
-        # if hasattr(self.grid, 'set_working'):
+            if idx in self._working:
+                self._working.remove(idx)
+        
+        # Update grid display
         self.grid.set_working(self._working)
         self.grid.set_completed(self._completed)
-        # If currently viewing this tile in detail, update button label
+        
+        # If currently viewing this tile in detail, update button labels
         if self._current_idx == idx and self.btnMarkComplete.isVisible():
             self.btnMarkComplete.setText("Unmark Complete" if idx in self._completed else "✓ Mark Complete")
+            self.btnMarkWorking.setText("⧗ Mark Working" if idx not in self._working else "Unmark Working")
 
     def _on_grid_toggle_working(self, idx: int):
-        # Toggle in the browser's source-of-truth set, then push to grid
+        # Toggle working in the browser's source-of-truth set
+        # States are mutually exclusive: completed, working, or neither
         if idx in self._working:
+            # Already working -> remove (clear status)
             self._working.remove(idx)
         else:
+            # Mark as working and remove from completed if present
             self._working.add(idx)
-        # if hasattr(self.grid, 'set_working'):
+            if idx in self._completed:
+                self._completed.remove(idx)
+        
+        # Update grid display
         self.grid.set_working(self._working)
         self.grid.set_completed(self._completed)
-        # If currently viewing this tile in detail, update button label
+        
+        # If currently viewing this tile in detail, update button labels
         if self._current_idx == idx and self.btnMarkWorking.isVisible():
             self.btnMarkWorking.setText("Unmark Working" if idx in self._working else "⧗ Mark Working")
+            self.btnMarkComplete.setText("✓ Mark Complete" if idx not in self._completed else "Unmark Complete")
 
 
     # ---- hotkeys 0..9 to toggle active group or 'e' to toggle eraser ----
