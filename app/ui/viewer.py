@@ -239,7 +239,8 @@ class MainWindow(QtWidgets.QWidget):
 
     def closeEvent(self, event: QtGui.QCloseEvent):
         def _task_clean_exit():
-            clean_exit(self.web_app_url,file_id = self.current["fileId"])
+            file_id = self.current["fileId"] if self.current else None
+            clean_exit(self.web_app_url, file_id=file_id)
         if self.current:
             self._run_in_thread(_task_clean_exit)
         event.accept()

@@ -164,7 +164,7 @@ def upload_tiles_batch(base_name: str,
     return res
 
 
-def skip_image(file_id: str, web_app_url: str = WEB_APP_URL) -> None:
+def skip_image(file_id: Optional[str] = None, web_app_url: str = WEB_APP_URL) -> None:
     """
     Skip the current image in the queue.
     
@@ -178,7 +178,7 @@ def skip_image(file_id: str, web_app_url: str = WEB_APP_URL) -> None:
     requests.post(web_app_url, json={"action": "skip", "fileId": file_id}, timeout=30)
 
 
-def mark_image_done(file_id: str, web_app_url: str = WEB_APP_URL) -> None:
+def mark_image_done(file_id: Optional[str] = None, web_app_url: str = WEB_APP_URL) -> None:
     """
     Mark the current image as done in the queue.
     
@@ -207,7 +207,7 @@ def get_user_list(web_app_url: str = WEB_APP_URL) -> list:
     return data.get("users", [])
 
 
-def clean_exit(web_app_url: str = WEB_APP_URL, file_id: str = None) -> None:
+def clean_exit(web_app_url: str = WEB_APP_URL, file_id: Optional[str] = None) -> None:
     """
     Notify the web app of a clean exit.
     
