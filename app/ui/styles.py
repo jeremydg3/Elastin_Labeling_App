@@ -35,6 +35,7 @@ class DarkPalette:
     # Accent colors
     ACCENT_PRIMARY = "#4d9eff"      # Primary actions, links
     ACCENT_SUCCESS = "#4CAF50"      # Success states, complete button
+    ACCENT_WORKING = "#ff9800"      # Warnings, eraser mode
     ACCENT_WARNING = "#ff9800"      # Warnings, eraser mode
     ACCENT_ERROR = "#f44336"        # Errors, destructive actions
     ACCENT_INFO = "#2196f3"         # Information, highlights
@@ -167,6 +168,22 @@ QPushButton[success="true"]:hover {{
 
 QPushButton[success="true"]:pressed {{
     background-color: #3c9840;
+}}
+
+/* Working buttons (e.g., Mark Working) */
+QPushButton[working="true"] {{
+    background-color: {DarkPalette.ACCENT_WORKING};
+    color: white;
+    border: none;
+    font-weight: 600;
+}}
+
+QPushButton[working="true"]:hover {{
+    background-color: #ffa726;
+}}
+
+QPushButton[working="true"]:pressed {{
+    background-color: #f57c00;
 }}
 
 /* Danger buttons */

@@ -27,6 +27,7 @@ class TileBrowser(QWidget):
         self._cols = 0
         self._masks: dict[int, np.ndarray] = {}  # tile_index -> mask (uint8 HxW, 0..9, 255=empty)
         self._completed: set[int] = set()
+        self._working: set[int] = set()
 
         # Top bar: Back + swatches + Mark complete button
         self.btnBack = QPushButton("← Back")
@@ -34,6 +35,9 @@ class TileBrowser(QWidget):
         self.btnMarkComplete = QPushButton("✓ Mark Complete")
         self.btnMarkComplete.setVisible(False)
         self.btnMarkComplete.setProperty("success", True)  # Use dark theme success button style
+        self.btnMarkWorking = QPushButton("⧗ Mark Working")
+        self.btnMarkWorking.setVisible(False)
+        self.btnMarkWorking.setProperty("working", True)  # Use dark theme working button style
         self.title = QLabel("")
         self.title.setProperty("heading", True)  # Use dark theme heading style
         self.groups = GroupBar()
@@ -46,6 +50,7 @@ class TileBrowser(QWidget):
         header = QHBoxLayout()
         header.addWidget(self.title)
         header.addStretch(1)
+        header.addWidget(self.btnMarkWorking)
         header.addWidget(self.btnMarkComplete)
 
         topwrap = QVBoxLayout()
@@ -71,9 +76,15 @@ class TileBrowser(QWidget):
         # wiring
         self.grid.tileChosen.connect(self._on_tile_clicked)
         self.grid.toggleComplete.connect(self._on_grid_toggle_complete)
+        # Connect working toggle if available on grid
+        if hasattr(self.grid, 'toggleWorking'):
+            self.grid.toggleWorking.connect(self._on_grid_toggle_working)
         self.btnBack.clicked.connect(self._on_back)
         self.btnMarkComplete.clicked.connect(self._on_mark_complete)
+        self.btnMarkWorking.clicked.connect(self._on_mark_working)
         self.groups.activeChanged.connect(self._on_group_changed)
+        # Connect detail view firstPaintStroke for auto-marking as working
+        self.detail.firstPaintStroke.connect(self._on_first_paint_stroke)
 
         # keyboard focus for number hotkeys
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -91,9 +102,14 @@ class TileBrowser(QWidget):
         self.enabled = enabled[:]
         self._rows, self._cols = layout
         self._completed.clear()    # reset completed state for new image
+        self._working.clear()      # reset working state for new image
         self._masks.clear()        # reset stored masks for all tiles
         self._current_idx = None   # clear any in-progress detail selection
-        self.grid.populate_fixed(self.tiles_pix, self.enabled, self._rows, self._cols, completed=self._completed)
+        # populate with both completed and working sets if supported
+        if hasattr(self.grid, 'populate_fixed') and self.grid.populate_fixed.__code__.co_argcount >= 7:
+            self.grid.populate_fixed(self.tiles_pix, self.enabled, self._rows, self._cols, completed=self._completed, working=self._working)
+        else:
+            self.grid.populate_fixed(self.tiles_pix, self.enabled, self._rows, self._cols, completed=self._completed)
         self._show_grid()
 
 
@@ -126,11 +142,17 @@ class TileBrowser(QWidget):
         self.detail.set_mask(self._masks.get(idx))
         self.btnBack.setVisible(True)
         self.btnMarkComplete.setVisible(True)
+        self.btnMarkWorking.setVisible(True)
         # Toggle button label based on completion state
         if idx in self._completed:
             self.btnMarkComplete.setText("Unmark Complete")
         else:
             self.btnMarkComplete.setText("✓ Mark Complete")
+        # Toggle button label based on working state
+        if idx in self._working:
+            self.btnMarkWorking.setText("Unmark Working")
+        else:
+            self.btnMarkWorking.setText("⧗ Mark Working")
         self.groups.setVisible(True)  # Show swatch bar in detail view
         self.stack.setCurrentIndex(1)
         # sync current states
@@ -162,13 +184,53 @@ class TileBrowser(QWidget):
                 self.btnMarkComplete.setText("Unmark Complete")
                 self.tileCompleted.emit(self._current_idx)
             self.grid.set_completed(self._completed)
+            if hasattr(self.grid, 'set_working'):
+                self.grid.set_working(self._working)
             self._show_grid()
+
+    def _on_mark_working(self):
+        """Mark current tile as working and save mask."""
+        if self._current_idx is not None:
+            m = self.detail.get_mask()
+            if m is not None:
+                self._masks[self._current_idx] = m
+            # toggle working state and update grid overlays
+            if self._current_idx in self._working:
+                self._working.remove(self._current_idx)
+                self.btnMarkWorking.setText("⧗ Mark Working")
+            else:
+                self._working.add(self._current_idx)
+                self.btnMarkWorking.setText("Unmark Working")
+            if hasattr(self.grid, 'set_working'):
+                self.grid.set_working(self._working)
+            self.grid.set_completed(self._completed)
+            self._show_grid()
+
+
+    def _on_first_paint_stroke(self):
+        """Auto-mark tile as working when user begins painting (if not already complete)."""
+        if self._current_idx is None:
+            return
+        # Don't auto-mark if tile is already completed
+        if self._current_idx in self._completed:
+            return
+        # Don't auto-mark if already working
+        if self._current_idx in self._working:
+            return
+        # Add to working set and update UI
+        self._working.add(self._current_idx)
+        self.btnMarkWorking.setText("Unmark Working")
+        # Update grid overlays
+        if hasattr(self.grid, 'set_working'):
+            self.grid.set_working(self._working)
+        self.grid.set_completed(self._completed)
 
 
     def _show_grid(self):
         self.stack.setCurrentIndex(0)
         self.btnBack.setVisible(False)
         self.btnMarkComplete.setVisible(False)
+        self.btnMarkWorking.setVisible(False)
         self.groups.setVisible(False)  # Hide swatch bar in grid view
 
 
@@ -187,9 +249,24 @@ class TileBrowser(QWidget):
         else:
             self._completed.add(idx)
         self.grid.set_completed(self._completed)
+        if hasattr(self.grid, 'set_working'):
+            self.grid.set_working(self._working)
         # If currently viewing this tile in detail, update button label
         if self._current_idx == idx and self.btnMarkComplete.isVisible():
             self.btnMarkComplete.setText("Unmark Complete" if idx in self._completed else "✓ Mark Complete")
+
+    def _on_grid_toggle_working(self, idx: int):
+        # Toggle in the browser's source-of-truth set, then push to grid
+        if idx in self._working:
+            self._working.remove(idx)
+        else:
+            self._working.add(idx)
+        if hasattr(self.grid, 'set_working'):
+            self.grid.set_working(self._working)
+        self.grid.set_completed(self._completed)
+        # If currently viewing this tile in detail, update button label
+        if self._current_idx == idx and self.btnMarkWorking.isVisible():
+            self.btnMarkWorking.setText("Unmark Working" if idx in self._working else "⧗ Mark Working")
 
 
     # ---- hotkeys 0..9 to toggle active group or 'e' to toggle eraser ----

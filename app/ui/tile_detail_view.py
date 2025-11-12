@@ -23,6 +23,7 @@ class TileDetailView(QGraphicsView):
     - Brush paints circle into mask, which is composited to a top overlay pixmap
     """
     maskChanged = pyqtSignal()  # emitted on paint edits
+    firstPaintStroke = pyqtSignal()  # emitted on first paint stroke (for auto-marking as working)
 
     def __init__(self, brush_radius: int = 10, parent=None):
         super().__init__(parent)
@@ -129,14 +130,12 @@ class TileDetailView(QGraphicsView):
 
         # Determine target value and track changed pixels for undo/redo
         target_val: np.uint8 = np.uint8(255) if self._eraser else np.uint8(self._active_group)
-        # Pixels that will actually change with this dab
+        # Check shape match (ensure painting within image bounds)
         if sub.shape != circle.shape:
             # safety check
             return
         change_mask = circle & (sub != target_val)
     
-        
-
         # Record old/new values for this stroke (only once per pixel)
         if self._painting and self._stroke_record is not None and np.any(change_mask):
             cy, cx = np.where(change_mask)
@@ -182,7 +181,6 @@ class TileDetailView(QGraphicsView):
         self._show_s = False  # Always start with RGB view
         self._show_v = False  # Always start with RGB view
         self._base_item = scene.addPixmap(pix)
-        # self._base_item.setZValue(0)
 
         # overlay
         self._overlay_pm = QPixmap(pix.size())
@@ -197,6 +195,7 @@ class TileDetailView(QGraphicsView):
         if self._base_item is not None:
             scene.setSceneRect(self._base_item.boundingRect())
         self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
         # Reset history for new base pixmap
         self._undo_stack.clear()
         self._redo_stack.clear()
@@ -398,6 +397,8 @@ class TileDetailView(QGraphicsView):
             # Begin new stroke record and clear redo chain
             self._stroke_record = {}
             self._redo_stack.clear()
+            # Emit firstPaintStroke for auto-marking as working
+            self.firstPaintStroke.emit()
             self._paint_at(x, y)   # uses cv2.circle(...) inside
             e.accept()
             return

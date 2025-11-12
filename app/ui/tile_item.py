@@ -10,6 +10,7 @@ class TileItem(QGraphicsObject):
     tileClicked = pyqtSignal(int)
     contextRequested = pyqtSignal(int, QPoint)  # (index, global point)
     _badge_icon: QPixmap | None = None  # lazy-loaded checkmark icon
+    _working_icon: QPixmap | None = None  # lazy-loaded working icon
 
     @staticmethod
     def _load_badge_icon() -> QPixmap | None:
@@ -27,13 +28,29 @@ class TileItem(QGraphicsObject):
         TileItem._badge_icon = None
         return None
 
-    def __init__(self, index: int, pix: QPixmap, tile_size: int, enabled: bool, completed: bool = False):
+    @staticmethod
+    def _load_working_icon() -> QPixmap | None:
+        if TileItem._working_icon is not None:
+            return TileItem._working_icon
+        try:
+            icon_path = os.path.join(basedir, "assets", "working_icon.png")
+            pm = QPixmap(icon_path)
+            if not pm.isNull():
+                TileItem._working_icon = pm
+                return pm
+        except Exception:
+            pass
+        TileItem._working_icon = None
+        return None
+
+    def __init__(self, index: int, pix: QPixmap, tile_size: int, enabled: bool, completed: bool = False, working: bool = False):
         super().__init__()
         self.index = index
         self.pix = pix
         self.tile_size = tile_size
         self.enabled_flag = enabled
         self.completed = completed
+        self.working = working
         self._hover = False
 
         self.setAcceptHoverEvents(True)
@@ -65,6 +82,7 @@ class TileItem(QGraphicsObject):
         if not self.enabled_flag:
             painter.fillRect(self.boundingRect(), QColor(30, 30, 30, 140))
 
+        # overlays: completed has precedence over working
         # completed overlay (semi-transparent green) + small badge in top-right
         if self.completed:
             painter.fillRect(self.boundingRect(), QColor(76, 175, 80, 110))
@@ -102,10 +120,45 @@ class TileItem(QGraphicsObject):
                 painter.drawLine(QPointF(x0, y0), QPointF(x1, y1))
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
             painter.restore()
+        elif self.working:
+            # working overlay (semi-transparent orange) + working badge
+            painter.fillRect(self.boundingRect(), QColor(255, 152, 0, 110))
+
+            # draw badge
+            margin = max(3, self.tile_size // 40)
+            badge = max(14, min(24, self.tile_size // 10))
+            x = self.tile_size - margin - badge
+            y = margin
+
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            # background circle for contrast
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 220))
+            painter.drawEllipse(x, y, badge, badge)
+
+            icon = TileItem._load_working_icon()
+            if icon is not None:
+                painter.drawPixmap(x, y, badge, badge, icon)
+            else:
+                # Fallback: draw a simple wrench-like mark
+                pen = QPen(QColor(255, 152, 0))
+                pen.setWidth(max(2, badge // 8))
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                painter.setPen(pen)
+                painter.drawLine(QPointF(x + badge*0.3, y + badge*0.3), QPointF(x + badge*0.7, y + badge*0.7))
+                painter.drawLine(QPointF(x + badge*0.7, y + badge*0.35), QPointF(x + badge*0.35, y + badge*0.7))
+            painter.restore()
 
     def set_completed(self, done: bool):
         if self.completed != done:
             self.completed = done
+            self.update()
+
+    def set_working(self, on: bool):
+        if self.working != on:
+            self.working = on
             self.update()
 
     # --- events ---

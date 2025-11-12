@@ -19,6 +19,7 @@ class TileGridView(QGraphicsView):
     """
     tileChosen = pyqtSignal(int)
     toggleComplete = pyqtSignal(int)  # request from context menu
+    toggleWorking = pyqtSignal(int)   # request from context menu
 
     def __init__(self, parent=None, tile_px: int = 255, pad: int = 8):
         super().__init__(parent)
@@ -35,7 +36,8 @@ class TileGridView(QGraphicsView):
         self._cols = 0
 
 
-    def populate_fixed(self, tiles_pix: list[QPixmap], enabled: list[bool], rows: int, cols: int, completed: Optional[set[int]] = None):
+    def populate_fixed(self, tiles_pix: list[QPixmap], enabled: list[bool], rows: int, cols: int,
+                       completed: Optional[set[int]] = None, working: Optional[set[int]] = None):
         """
         Fixed grid layout (rows x cols). No re-arranging on resize.
         
@@ -53,7 +55,10 @@ class TileGridView(QGraphicsView):
         self._rows, self._cols = rows, cols
         if completed is None:
             completed = set()
+        if working is None:
+            working = set()
         self._completed_set = set(completed)
+        self._working_set = set(working)
 
         sc = self.scene()
         if sc is None:
@@ -67,7 +72,7 @@ class TileGridView(QGraphicsView):
         for r in range(rows):
             for c in range(cols):
                 pix = self._pixmaps[idx]
-                it = TileItem(idx, pix, tp, enabled=self._enabled[idx], completed=(idx in completed))  # QGraphicsObject
+                it = TileItem(idx, pix, tp, enabled=self._enabled[idx], completed=(idx in completed), working=(idx in working))  # QGraphicsObject
                 it.setPos(c * (tp + pad), r * (tp + pad))  # fixed slots
                 it.tileClicked.connect(self.tileChosen.emit)
                 it.contextRequested.connect(self._on_item_context)
@@ -91,16 +96,29 @@ class TileGridView(QGraphicsView):
         for it in self._items:
             it.set_completed(it.index in self._completed_set)
 
+    def set_working(self, working: set[int]):
+        """Update working overlay for all items based on a set of indices."""
+        self._working_set = set(working)
+        if not hasattr(self, "_items"):
+            return
+        for it in self._items:
+            it.set_working(it.index in self._working_set)
+
 
     def _on_item_context(self, idx: int, global_pt: QPoint):
         # Build a simple context menu to toggle completion
         menu = QMenu()
         is_completed = idx in getattr(self, "_completed_set", set())
-        action_text = "Unmark Complete" if is_completed else "✓ Mark Complete"
-        act_toggle = menu.addAction(action_text)
+        is_working = idx in getattr(self, "_working_set", set())
+
+        act_toggle_complete = menu.addAction("Unmark Complete" if is_completed else "✓ Mark Complete")
+        act_toggle_working = menu.addAction("Unmark Working" if is_working else "⧗ Mark Working")
+
         chosen = menu.exec(global_pt)
-        if chosen == act_toggle:
+        if chosen == act_toggle_complete:
             self.toggleComplete.emit(idx)
+        elif chosen == act_toggle_working:
+            self.toggleWorking.emit(idx)
 
 
     def _fit_scene(self):
