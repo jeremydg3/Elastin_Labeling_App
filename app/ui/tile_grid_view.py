@@ -1,35 +1,41 @@
 from typing import Optional
-from PyQt6 import QtWidgets, QtGui, QtCore
+from PyQt6 import QtGui
+
+from PyQt6.QtGui import QPixmap, QPainter, QResizeEvent
+from PyQt6.QtCore import pyqtSignal, Qt, QPoint
+from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QMenu
+
 import os
 from tile_item import TileItem
+from styles import get_tile_grid_background
 
 basedir = os.path.dirname(__file__)
 
 
-class TileGridView(QtWidgets.QGraphicsView):
+class TileGridView(QGraphicsView):
     """
     A fixed grid view of tiles with context menu support.
     Emits signals when tiles are clicked or context menu actions are requested.
     """
-    tileChosen = QtCore.pyqtSignal(int)
-    toggleComplete = QtCore.pyqtSignal(int)  # request from context menu
+    tileChosen = pyqtSignal(int)
+    toggleComplete = pyqtSignal(int)  # request from context menu
 
     def __init__(self, parent=None, tile_px: int = 255, pad: int = 8):
         super().__init__(parent)
-        self.setScene(QtWidgets.QGraphicsScene(self))
-        self.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
-        self.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform, True)
-        self.setDragMode(QtWidgets.QGraphicsView.DragMode.NoDrag)
-        self.setBackgroundBrush(QtGui.QColor("#f8f9fa"))
+        self.setScene(QGraphicsScene(self))
+        self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setBackgroundBrush(QtGui.QColor(get_tile_grid_background()))
         self.tile_px = tile_px
         self.pad = pad
-        self._pixmaps: list[QtGui.QPixmap] = []
+        self._pixmaps: list[QPixmap] = []
         self._enabled: list[bool] = []
         self._rows = 0
         self._cols = 0
 
 
-    def populate_fixed(self, tiles_pix: list[QtGui.QPixmap], enabled: list[bool], rows: int, cols: int, completed: Optional[set[int]] = None):
+    def populate_fixed(self, tiles_pix: list[QPixmap], enabled: list[bool], rows: int, cols: int, completed: Optional[set[int]] = None):
         """
         Fixed grid layout (rows x cols). No re-arranging on resize.
         
@@ -51,7 +57,7 @@ class TileGridView(QtWidgets.QGraphicsView):
 
         sc = self.scene()
         if sc is None:
-            sc = QtWidgets.QGraphicsScene(self)
+            sc = QGraphicsScene(self)
             self.setScene(sc)
         sc.clear()
 
@@ -86,9 +92,9 @@ class TileGridView(QtWidgets.QGraphicsView):
             it.set_completed(it.index in self._completed_set)
 
 
-    def _on_item_context(self, idx: int, global_pt: QtCore.QPoint):
+    def _on_item_context(self, idx: int, global_pt: QPoint):
         # Build a simple context menu to toggle completion
-        menu = QtWidgets.QMenu()
+        menu = QMenu()
         is_completed = idx in getattr(self, "_completed_set", set())
         action_text = "Unmark Complete" if is_completed else "✓ Mark Complete"
         act_toggle = menu.addAction(action_text)
@@ -101,10 +107,10 @@ class TileGridView(QtWidgets.QGraphicsView):
         scene = self.scene()
         if scene is None or not scene.items():
             return
-        self.fitInView(self.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+        self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
 
-    def resizeEvent(self, e: QtGui.QResizeEvent) -> None:
+    def resizeEvent(self, e: QResizeEvent) -> None:
         # DO NOT reflow—just scale the view to fit the fixed scene rect
         self._fit_scene()
         super().resizeEvent(e)

@@ -2,11 +2,15 @@
 User Selection Dialog
 Allows users to select an existing user or create a new one on app startup.
 """
-from PyQt6 import QtWidgets, QtCore
+
+from PyQt6.QtWidgets import (QLineEdit, QInputDialog, QAbstractItemView, QListWidget, 
+                             QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, 
+                             QPushButton, QInputDialog, QMessageBox)
+
 from typing import Optional, List
 from webapp_interface_funcs import create_new_user
 
-class UserSelectionDialog(QtWidgets.QDialog):
+class UserSelectionDialog(QDialog):
     """
     Dialog for selecting or creating a user at app startup.
     """
@@ -19,28 +23,28 @@ class UserSelectionDialog(QtWidgets.QDialog):
         self.selected_user: Optional[str] = None
         
         # Main layout
-        layout = QtWidgets.QVBoxLayout(self)
+        layout = QVBoxLayout(self)
         
         # Instructions
-        instructions = QtWidgets.QLabel("Please select your username or create a new one:")
+        instructions = QLabel("Please select your username or create a new one:")
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
         
         # User list
-        self.user_list = QtWidgets.QListWidget()
+        self.user_list = QListWidget()
         self.user_list.addItems(users)
-        self.user_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.user_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.user_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.user_list.itemDoubleClicked.connect(self._on_double_click)
         layout.addWidget(self.user_list)
         
         # Buttons
-        button_layout = QtWidgets.QHBoxLayout()
+        button_layout = QHBoxLayout()
         
-        self.btn_create_new = QtWidgets.QPushButton("Create New User")
+        self.btn_create_new = QPushButton("Create New User")
         self.btn_create_new.clicked.connect(self._on_create_new)
         
-        self.btn_ok = QtWidgets.QPushButton("OK")
+        self.btn_ok = QPushButton("OK")
         self.btn_ok.setEnabled(False)  # Disabled until user selects
         self.btn_ok.clicked.connect(self.accept)
         self.btn_ok.setDefault(True)
@@ -71,11 +75,11 @@ class UserSelectionDialog(QtWidgets.QDialog):
     
     def _on_create_new(self):
         """Prompt user to create a new username."""
-        text, ok = QtWidgets.QInputDialog.getText(
+        text, ok = QInputDialog.getText(
             self,
             "Create New User",
             "Enter your username:",
-            QtWidgets.QLineEdit.EchoMode.Normal
+            QLineEdit.EchoMode.Normal
         )
         
         if ok and text.strip():
@@ -88,7 +92,7 @@ class UserSelectionDialog(QtWidgets.QDialog):
                     existing_users.append(item.text())
             
             if username in existing_users:
-                QtWidgets.QMessageBox.warning(
+                QMessageBox.warning(
                     self,
                     "Username Exists",
                     f"The username '{username}' already exists. Please select it from the list or choose a different name."
@@ -99,7 +103,7 @@ class UserSelectionDialog(QtWidgets.QDialog):
             create_new_user(username)
             self.accept()
         elif ok and not text.strip():
-            QtWidgets.QMessageBox.warning(
+            QMessageBox.warning(
                 self,
                 "Invalid Username",
                 "Username cannot be empty. Please try again."
@@ -124,6 +128,6 @@ def show_user_selection_dialog(users: List[str], parent=None) -> Optional[str]:
     dialog = UserSelectionDialog(users, parent)
     result = dialog.exec()
     
-    if result == QtWidgets.QDialog.DialogCode.Accepted:
+    if result == QDialog.DialogCode.Accepted:
         return dialog.get_selected_user()
     return None

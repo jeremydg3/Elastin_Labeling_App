@@ -1,12 +1,17 @@
 """
 Loading animation dialog with a spinning icon.
 """
-from PyQt6 import QtWidgets, QtGui, QtCore
+
+from PyQt6.QtGui import (QPixmap, QPainter, QMovie, QKeyEvent, 
+                         QShowEvent, QCloseEvent, QBrush)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QDialog, QLabel, QWidget, QVBoxLayout
+
 import os
 
 basedir = os.path.dirname(__file__)
 
-class LoadingDialog(QtWidgets.QDialog):
+class LoadingDialog(QDialog):
     """
     A modal loading dialog with an animated spinning icon.
     Provides a clean way to show background work is in progress.
@@ -17,9 +22,9 @@ class LoadingDialog(QtWidgets.QDialog):
         self.setWindowTitle(title)
         self.setModal(True)
         self.setWindowFlags(
-            QtCore.Qt.WindowType.Dialog | 
-            QtCore.Qt.WindowType.CustomizeWindowHint |
-            QtCore.Qt.WindowType.WindowTitleHint
+            Qt.WindowType.Dialog | 
+            Qt.WindowType.CustomizeWindowHint |
+            Qt.WindowType.WindowTitleHint
         )
         
         # Animation state
@@ -28,20 +33,20 @@ class LoadingDialog(QtWidgets.QDialog):
         self._using_cat = False
         
         # Create loading animation (spinning icon)
-        self._loading_label = QtWidgets.QLabel()
-        self._loading_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._loading_label = QLabel()
+        self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Message label
         message = message + "'c' or 'a' for easter egg (:"
-        self._message_label = QtWidgets.QLabel(message)
-        self._message_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._message_label = QLabel(message)
+        self._message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Add rotation animation timer
-        self._rotation_timer = QtCore.QTimer()
+        self._rotation_timer = QTimer()
         self._rotation_timer.timeout.connect(self._rotate_icon)
         
         # Layout
-        layout = QtWidgets.QVBoxLayout()
+        layout = QVBoxLayout()
         layout.addWidget(self._message_label)
         layout.addWidget(self._loading_label)
         self.setLayout(layout)
@@ -78,7 +83,7 @@ class LoadingDialog(QtWidgets.QDialog):
         # Load and display the Alan gif
         try:
             alan_path = os.path.join(basedir, "assets", "calculating-alan.gif")
-            movie = QtGui.QMovie(str(alan_path))
+            movie = QMovie(str(alan_path))
             if not movie.isValid():
                 # Fallback to spinner if gif not found
                 self._using_alan = False
@@ -107,7 +112,7 @@ class LoadingDialog(QtWidgets.QDialog):
         # Load and display the Alan gif
         try:
             cat_path = os.path.join(basedir, "assets", "orange-cat-loading.gif")
-            movie = QtGui.QMovie(cat_path)
+            movie = QMovie(cat_path)
             if not movie.isValid():
                 # Fallback to spinner if gif not found
                 self._using_cat = False
@@ -121,30 +126,30 @@ class LoadingDialog(QtWidgets.QDialog):
             self._using_cat = False
             self._rotation_timer.start(50)
     
-    def keyPressEvent(self, event: QtGui.QKeyEvent):
+    def keyPressEvent(self, event: QKeyEvent):
         """Handle keyboard events - switch to Alan gif when 'a' is pressed."""
-        if event.key() == QtCore.Qt.Key.Key_A:
+        if event.key() == Qt.Key.Key_A:
             self._switch_to_alan()
             event.accept()
-        elif event.key() == QtCore.Qt.Key.Key_C:
+        elif event.key() == Qt.Key.Key_C:
             self._switch_to_cat()
             event.accept()
         else:
             super().keyPressEvent(event)
     
-    def showEvent(self, event: QtGui.QShowEvent):
+    def showEvent(self, event: QShowEvent):
         """Auto-start animation when dialog is shown."""
         super().showEvent(event)
         # Center on parent if available
         parent = self.parent()
-        if parent and isinstance(parent, QtWidgets.QWidget):
+        if parent and isinstance(parent, QWidget):
             parent_geo = parent.geometry()
             x = parent_geo.x() + (parent_geo.width() - self.width()) // 2
             y = parent_geo.y() + (parent_geo.height() - self.height()) // 2
             self.move(x, y)
         self.start()
     
-    def closeEvent(self, event: QtGui.QCloseEvent):
+    def closeEvent(self, event: QCloseEvent):
         """Auto-stop animation when dialog is closed."""
         self.stop()
         super().closeEvent(event)
@@ -154,13 +159,13 @@ class LoadingDialog(QtWidgets.QDialog):
         self._rotation_angle = (self._rotation_angle + 15) % 360
         
         # Create rotated pixmap
-        pixmap = QtGui.QPixmap(50, 50)
-        pixmap.fill(QtCore.Qt.GlobalColor.transparent)
-        painter = QtGui.QPainter(pixmap)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        pixmap = QPixmap(50, 50)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.translate(25, 25)
         painter.rotate(self._rotation_angle)
-        painter.setBrush(QtGui.QBrush(QtCore.Qt.GlobalColor.blue))
+        painter.setBrush(QBrush(Qt.GlobalColor.blue))
         painter.drawEllipse(-5, -20, 10, 10)
         painter.drawEllipse(-5, 10, 10, 10)
         painter.end()

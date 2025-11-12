@@ -1,10 +1,12 @@
 import sys, os
 import numpy as np
 import cv2
-from PyQt6 import QtWidgets, QtCore, QtGui
-from PyQt6.QtGui import QIcon
 import math
 from typing import List, Any, Callable, Optional
+
+from PyQt6.QtGui import QCloseEvent, QIcon
+from PyQt6.QtCore import pyqtSignal, Qt, QObject, QCoreApplication, QThread, pyqtSlot
+from PyQt6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QApplication
 
 from tile_browser import TileBrowser
 from loading_animation import LoadingDialog
@@ -18,15 +20,16 @@ from webapp_interface_funcs import (
     mark_image_done,
     clean_exit
 )
+from styles import apply_dark_theme
 
 basedir = os.path.dirname(__file__)
 
 TILE_SIZE = 256
 
-class Worker(QtCore.QObject):
+class Worker(QObject):
     """Generic worker to run a callable in a QThread and emit results back to UI."""
-    finished = QtCore.pyqtSignal(object)
-    error = QtCore.pyqtSignal(str)
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
 
     def __init__(self, fn: Callable, *args: Any, **kwargs: Any):
         super().__init__()
@@ -34,7 +37,7 @@ class Worker(QtCore.QObject):
         self._args = args
         self._kwargs = kwargs or {}
 
-    @QtCore.pyqtSlot()
+    @pyqtSlot()
     def run(self):
         """Run the callable and emit finished or error signals."""
         try:
@@ -44,7 +47,7 @@ class Worker(QtCore.QObject):
             self.error.emit(str(e))
  
     
-class MainWindow(QtWidgets.QWidget):
+class MainWindow(QWidget):
     """
     Queue-backed TIFF viewer with tile grid:
       - Fetches next image from Apps Script web app
@@ -61,22 +64,24 @@ class MainWindow(QtWidgets.QWidget):
 
         # --- UI ---
         self.view = TileBrowser(tile_px=self.tile_size)  # from tile_grid_view.py
-        self.btnNext = QtWidgets.QPushButton("Get Next")
-        self.btnDone = QtWidgets.QPushButton("Mark Done")
-        self.btnSkip = QtWidgets.QPushButton("Skip Image")
-        self.status = QtWidgets.QLabel("")
+        self.btnNext = QPushButton("Get Next")
+        self.btnNext.setProperty("primary", True)  # Use primary button style
+        self.btnDone = QPushButton("Mark Done")
+        self.btnDone.setProperty("success", True)  # Use success button style
+        self.btnSkip = QPushButton("Skip Image")
+        self.status = QLabel("")
         self._busy_depth = 0
-        self.status.setTextFormat(QtCore.Qt.TextFormat.PlainText)
-        self.status.setStyleSheet("color:#444;")
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
+        # Status label will use theme's secondary text color
         self.image_title = ""
 
-        ctl = QtWidgets.QHBoxLayout()
+        ctl = QHBoxLayout()
         ctl.addWidget(self.btnNext)
         ctl.addWidget(self.btnDone)
         ctl.addWidget(self.btnSkip)
         ctl.addStretch(1)
 
-        layout = QtWidgets.QVBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.addLayout(ctl)
         layout.addWidget(self.view, 1)
         layout.addWidget(self.status)
@@ -84,7 +89,7 @@ class MainWindow(QtWidgets.QWidget):
         # --- state ---
         self.current = None  # {fileId,fileName,...}
         self.tiles_np = []  # type: List[np.ndarray]  # tiles for current image
-        self._bg_threads = []  # type: list[QtCore.QThread]
+        self._bg_threads = []  # type: list[QThread]
         self._bg_workers = []  # type: list[Worker]
         self.user = None  # type: Optional[str]  # Selected username
 
@@ -107,7 +112,7 @@ class MainWindow(QtWidgets.QWidget):
             # Show loading while fetching user list
             loading = LoadingDialog(self, message="Loading user list...")
             loading.show()
-            QtCore.QCoreApplication.processEvents()
+            QCoreApplication.processEvents()
             
             # Fetch user list from web app
             usernames = get_user_list(self.web_app_url)
@@ -125,7 +130,7 @@ class MainWindow(QtWidgets.QWidget):
                 return False
                 
         except Exception as e:
-            QtWidgets.QMessageBox.critical(
+            QMessageBox.critical(
                 self,
                 "Error Loading Users",
                 f"Failed to load user list: {str(e)}\n\nPlease check your connection and try again."
@@ -194,7 +199,7 @@ class MainWindow(QtWidgets.QWidget):
         # Determine which tiles have been marked complete and upload only those
         completed_idxs = getattr(self.view, "get_completed_indices", lambda: [])()
         if not completed_idxs:
-            QtWidgets.QMessageBox.information(self, "Nothing to upload", "No tiles are marked complete. Mark tiles as complete before uploading.")
+            QMessageBox.information(self, "Nothing to upload", "No tiles are marked complete. Mark tiles as complete before uploading.")
             return
 
         tiles_to_upload = [self.tiles_np[i] for i in completed_idxs]
@@ -247,7 +252,7 @@ class MainWindow(QtWidgets.QWidget):
         self._set_work_buttons_enabled(False)
 
 
-    def closeEvent(self, event: QtGui.QCloseEvent):
+    def closeEvent(self, event: QCloseEvent):
         def _task_clean_exit():
             file_id = self.current["fileId"] if self.current else None
             clean_exit(self.web_app_url, file_id=file_id)
@@ -275,7 +280,7 @@ class MainWindow(QtWidgets.QWidget):
                     delattr(self, 'loading_dialog')
                 
                 # Process events to ensure UI updates
-                QtCore.QCoreApplication.processEvents()
+                QCoreApplication.processEvents()
 
         # Buttons state
         self.btnNext.setEnabled(self._busy_depth == 0 and self.current is None)
@@ -299,7 +304,7 @@ class MainWindow(QtWidgets.QWidget):
         
         args = args or ()
         kwargs = kwargs or {}
-        thread = QtCore.QThread(self)
+        thread = QThread(self)
         worker = Worker(fn, *args, **kwargs)
         worker.moveToThread(thread)
 
@@ -338,7 +343,7 @@ class MainWindow(QtWidgets.QWidget):
         Args:
             message: The error message to display.
         """
-        QtWidgets.QMessageBox.critical(self, "Error", message)
+        QMessageBox.critical(self, "Error", message)
         self.status.setText(message)
 
 
@@ -445,7 +450,11 @@ class MainWindow(QtWidgets.QWidget):
 
 
 if __name__ == "__main__":
-    app = QtWidgets.QApplication(sys.argv)
+    app = QApplication(sys.argv)
+    
+    # Apply dark theme to the entire application
+    apply_dark_theme(app)
+    
     app.setWindowIcon(QIcon(os.path.join(basedir, "assets", "logo.png")))
     w = MainWindow()
     

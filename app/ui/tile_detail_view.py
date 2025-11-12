@@ -1,5 +1,12 @@
 import numpy as np
-from PyQt6 import QtWidgets, QtGui, QtCore
+
+
+from PyQt6.QtGui import (QPixmap, QKeyEvent, QPainter, QColor, 
+                         QBrush, QPen, QShortcut, QKeySequence, 
+                         QImage, QMouseEvent, QHoverEvent, QWheelEvent)
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsEllipseItem
+
 from group_bar import GROUP_COLORS
 import os
 import cv2
@@ -9,37 +16,36 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 
 MAX_HISTORY = 50
 
-class TileDetailView(QtWidgets.QGraphicsView):
+class TileDetailView(QGraphicsView):
     """
     Shows one tile pixmap + a paintable overlay mask.
     - Mask is uint8 (0..9 = group id, 255 = empty)
     - Brush paints circle into mask, which is composited to a top overlay pixmap
     """
-    maskChanged = QtCore.pyqtSignal()  # emitted on paint edits
+    maskChanged = pyqtSignal()  # emitted on paint edits
 
     def __init__(self, brush_radius: int = 10, parent=None):
         super().__init__(parent)
-        self.setScene(QtWidgets.QGraphicsScene(self))
-        self.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
-        self.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform, True)
-        self.setDragMode(QtWidgets.QGraphicsView.DragMode.NoDrag)
-        self.setTransformationAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-
+        self.setScene(QGraphicsScene(self))
+        self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self._base_item = None
         self._overlay_item = None
-        self._cursor_item = QtWidgets.QGraphicsEllipseItem()
+        self._cursor_item = QGraphicsEllipseItem()
         self._cursor_item.setZValue(99)
-        pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 220))  # default brush outline
+        pen = QPen(QColor(255, 255, 255, 220))  # default brush outline
         pen.setWidth(10)
         self._cursor_item.setPen(pen)
-        self._cursor_item.setBrush(QtGui.QBrush(QtCore.Qt.BrushStyle.NoBrush))
+        self._cursor_item.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         self._cursor_item.setVisible(False)
         self._eraser = False
         
         # Ensure scene exists before adding items
         scene = self.scene()
         if scene is None:
-            scene = QtWidgets.QGraphicsScene(self)
+            scene = QGraphicsScene(self)
             self.setScene(scene)
             scene.addItem(self._cursor_item)
 
@@ -61,9 +67,9 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._max_history = MAX_HISTORY
 
         # Shortcuts: Ctrl+Z (undo), Ctrl+Y (redo)
-        self._sc_undo = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Z'), self)
+        self._sc_undo = QShortcut(QKeySequence('Ctrl+Z'), self)
         self._sc_undo.activated.connect(self.undo)
-        self._sc_redo = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Y'), self)
+        self._sc_redo = QShortcut(QKeySequence('Ctrl+Y'), self)
         self._sc_redo.activated.connect(self.redo)
 
 
@@ -88,16 +94,16 @@ class TileDetailView(QtWidgets.QGraphicsView):
     def _refresh_cursor_pen(self):
         """Set cursor ring color based on eraser/group state."""
         if self._eraser:
-            color = QtGui.QColor(255, 170, 0, 240)  # orange for eraser
+            color = QColor(255, 170, 0, 240)  # orange for eraser
         elif self._active_group != -1:
             # color of the active group
             hexc = GROUP_COLORS.get(self._active_group, "#FFFFFF")
-            color = QtGui.QColor(hexc)
+            color = QColor(hexc)
             color.setAlpha(240)
         else:
-            color = QtGui.QColor(255, 255, 255, 220)  # default white
+            color = QColor(255, 255, 255, 220)  # default white
 
-        pen = QtGui.QPen(color)
+        pen = QPen(color)
         pen.setWidth(1)
         self._cursor_item.setPen(pen)
 
@@ -124,7 +130,12 @@ class TileDetailView(QtWidgets.QGraphicsView):
         # Determine target value and track changed pixels for undo/redo
         target_val: np.uint8 = np.uint8(255) if self._eraser else np.uint8(self._active_group)
         # Pixels that will actually change with this dab
+        if sub.shape != circle.shape:
+            # safety check
+            return
         change_mask = circle & (sub != target_val)
+    
+        
 
         # Record old/new values for this stroke (only once per pixel)
         if self._painting and self._stroke_record is not None and np.any(change_mask):
@@ -152,7 +163,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self.maskChanged.emit()
 
 
-    def set_base_pixmap(self, pix: QtGui.QPixmap):
+    def set_base_pixmap(self, pix: QPixmap):
         scene = self.scene()
         if scene is not None:
             # Remove cursor from scene before clearing to prevent deletion
@@ -160,7 +171,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
                 scene.removeItem(self._cursor_item)
             scene.clear()
         else:
-            scene = QtWidgets.QGraphicsScene(self)
+            scene = QGraphicsScene(self)
             self.setScene(scene)
         
         # Store original RGB pixmap and reset display state
@@ -174,8 +185,8 @@ class TileDetailView(QtWidgets.QGraphicsView):
         # self._base_item.setZValue(0)
 
         # overlay
-        self._overlay_pm = QtGui.QPixmap(pix.size())
-        self._overlay_pm.fill(QtCore.Qt.GlobalColor.transparent)
+        self._overlay_pm = QPixmap(pix.size())
+        self._overlay_pm.fill(Qt.GlobalColor.transparent)
         self._overlay_item = scene.addPixmap(self._overlay_pm)
         if self._overlay_item is not None:
             self._overlay_item.setZValue(10)
@@ -185,7 +196,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
 
         if self._base_item is not None:
             scene.setSceneRect(self._base_item.boundingRect())
-        self.fitInView(self.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+        self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
         # Reset history for new base pixmap
         self._undo_stack.clear()
         self._redo_stack.clear()
@@ -214,12 +225,12 @@ class TileDetailView(QtWidgets.QGraphicsView):
         return None if self._mask is None else self._mask.copy()
 
 
-    def _pixmap_to_hsv_value(self, pixmap: QtGui.QPixmap, channel: str) -> QtGui.QPixmap:
+    def _pixmap_to_hsv_value(self, pixmap: QPixmap, channel: str) -> QPixmap:
         """Convert a QPixmap to HSV and extract the specified channel as grayscale."""
         assert channel in ('value', 'hue', 'saturation')
 
         # Convert QPixmap to QImage in RGB888 format
-        qimg = pixmap.toImage().convertToFormat(QtGui.QImage.Format.Format_RGB888)
+        qimg = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
         
         # Convert to numpy array
         width = qimg.width()
@@ -350,27 +361,27 @@ class TileDetailView(QtWidgets.QGraphicsView):
             sel = (self._mask == gid)
             if not np.any(sel):
                 continue
-            c = QtGui.QColor(hexc)
+            c = QColor(hexc)
             overlay[sel, 0] = c.red()
             overlay[sel, 1] = c.green()
             overlay[sel, 2] = c.blue()
             overlay[sel, 3] = alpha
         # convert to QImage -> QPixmap
-        qimg = QtGui.QImage(overlay.data, w, h, 4*w, QtGui.QImage.Format.Format_RGBA8888)
-        self._overlay_pm = QtGui.QPixmap.fromImage(qimg)
+        qimg = QImage(overlay.data, w, h, 4*w, QImage.Format.Format_RGBA8888)
+        self._overlay_pm = QPixmap.fromImage(qimg)
         self._overlay_item.setPixmap(self._overlay_pm)
 
 
     # ---- painting ----
-    def _img_pos_from_view(self, ev: QtGui.QMouseEvent | QtGui.QHoverEvent):
+    def _img_pos_from_view(self, ev: QMouseEvent | QHoverEvent):
         sp = self.mapToScene(ev.position().toPoint())
         return sp.x(), sp.y()
 
 
     # ---- events ----
-    def mousePressEvent(self, e: QtGui.QMouseEvent):
+    def mousePressEvent(self, e: QMouseEvent):
         # Left-click starts a paint stroke if a tool is active
-        if e.button() == QtCore.Qt.MouseButton.LeftButton and (self._eraser or self._active_group != -1):
+        if e.button() == Qt.MouseButton.LeftButton and (self._eraser or self._active_group != -1):
             # ensure we receive keyboard events (0–9, E, +/-)
             self.setFocus()
 
@@ -392,12 +403,12 @@ class TileDetailView(QtWidgets.QGraphicsView):
             return
 
         # Right-click to pan
-        if e.button() == QtCore.Qt.MouseButton.RightButton:
-            self.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
+        if e.button() == Qt.MouseButton.RightButton:
+            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             # Create a fake left-click event to start panning
-            fake_event = QtGui.QMouseEvent(
+            fake_event = QMouseEvent(
                 e.type(), e.position(), e.globalPosition(),
-                QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
                 e.modifiers()
             )
             super().mousePressEvent(fake_event)
@@ -408,7 +419,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         super().mousePressEvent(e)
 
 
-    def mouseMoveEvent(self, e: QtGui.QMouseEvent):
+    def mouseMoveEvent(self, e: QMouseEvent):
         # move brush cursor
         x, y = self._img_pos_from_view(e)
         r = self._brush_radius
@@ -421,8 +432,8 @@ class TileDetailView(QtWidgets.QGraphicsView):
         super().mouseMoveEvent(e)
 
 
-    def mouseReleaseEvent(self, e: QtGui.QMouseEvent):
-        if e.button() == QtCore.Qt.MouseButton.LeftButton and self._painting:
+    def mouseReleaseEvent(self, e: QMouseEvent):
+        if e.button() == Qt.MouseButton.LeftButton and self._painting:
             self._painting = False
             # Finalize stroke: push to undo stack if any changes
             if self._stroke_record is not None and len(self._stroke_record) > 0:
@@ -443,38 +454,38 @@ class TileDetailView(QtWidgets.QGraphicsView):
             return
         
         # Right-click release to stop panning
-        if e.button() == QtCore.Qt.MouseButton.RightButton:
-            self.setDragMode(QtWidgets.QGraphicsView.DragMode.NoDrag)
+        if e.button() == Qt.MouseButton.RightButton:
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
             e.accept()
             return
         
         super().mouseReleaseEvent(e)
 
 
-    def keyPressEvent(self, e: QtGui.QKeyEvent):
+    def keyPressEvent(self, e: QKeyEvent):
         # Undo/Redo shortcuts (in addition to explicit QShortcuts)
-        if e.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
-            if e.key() == QtCore.Qt.Key.Key_Z:
+        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if e.key() == Qt.Key.Key_Z:
                 self.undo(); e.accept(); return
-            if e.key() == QtCore.Qt.Key.Key_Y:
+            if e.key() == Qt.Key.Key_Y:
                 self.redo(); e.accept(); return
         # Toggle HSV Value display with 'V' key
-        if e.key() == QtCore.Qt.Key.Key_V:
+        if e.key() == Qt.Key.Key_V:
             self.toggle_hsv_display("value")
             e.accept(); return
         # Toggle HSV Hue display with 'H' key
-        if e.key() == QtCore.Qt.Key.Key_H:
+        if e.key() == Qt.Key.Key_H:
             self.toggle_hsv_display("hue")
             e.accept(); return
         # Toggle HSV Saturation display with 'S' key
-        if e.key() == QtCore.Qt.Key.Key_S:
+        if e.key() == Qt.Key.Key_S:
             self.toggle_hsv_display("saturation")
             e.accept(); return
         # Clear mask with 'C' key
-        if e.key() == QtCore.Qt.Key.Key_C:
+        if e.key() == Qt.Key.Key_C:
             self.set_mask(None)
             e.accept(); return
-        if e.key() in (QtCore.Qt.Key.Key_Plus, QtCore.Qt.Key.Key_Equal):
+        if e.key() in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
             self._brush_radius = min(128, self._brush_radius + 1)
             # Update cursor size immediately
             if self._cursor_item.isVisible():
@@ -482,7 +493,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
                 r = self._brush_radius
                 self._cursor_item.setRect(x - r, y - r, 2*r, 2*r)
                 e.accept(); return
-        if e.key() == QtCore.Qt.Key.Key_Minus:
+        if e.key() == Qt.Key.Key_Minus:
             self._brush_radius = max(1, self._brush_radius - 1)
             # Update cursor size immediately
             if self._cursor_item.isVisible():
@@ -493,14 +504,14 @@ class TileDetailView(QtWidgets.QGraphicsView):
         super().keyPressEvent(e)
 
 
-    def wheelEvent(self, event: QtGui.QWheelEvent):
+    def wheelEvent(self, event: QWheelEvent):
         # If Ctrl is held, use wheel to change brush size instead of zooming
         try:
             modifiers = event.modifiers()
         except Exception:
-            modifiers = QtCore.Qt.KeyboardModifier.NoModifier
+            modifiers = Qt.KeyboardModifier.NoModifier
 
-        if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
             if self._eraser or self._active_group >= 0:
                 # angleDelta().y() is positive for wheel-up, negative for wheel-down
                 delta = event.angleDelta().y()

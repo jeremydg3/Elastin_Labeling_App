@@ -1,22 +1,27 @@
 import numpy as np
 from typing import List, Tuple
-from PyQt6 import QtWidgets, QtGui, QtCore
+
+from PyQt6.QtGui import QPixmap, QKeyEvent
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import (QLabel, QWidget, QVBoxLayout, QPushButton, 
+                             QHBoxLayout, QStackedLayout)
+
 from group_bar import GroupBar
 from tile_detail_view import TileDetailView
 from utils import np_to_qpixmap
 from tile_grid_view import TileGridView
 
-class TileBrowser(QtWidgets.QWidget):
+class TileBrowser(QWidget):
     """
     Grid + detail with paint overlay per tile.
     """
-    tileChosen = QtCore.pyqtSignal(int)
-    tileCompleted = QtCore.pyqtSignal(int)  # emits tile index when marked complete
+    tileChosen = pyqtSignal(int)
+    tileCompleted = pyqtSignal(int)  # emits tile index when marked complete
 
     def __init__(self, parent=None, tile_px: int = 256):
         super().__init__(parent)
         self.tile_px = tile_px
-        self.tiles_pix: List[QtGui.QPixmap] = []
+        self.tiles_pix: List[QPixmap] = []
         self.enabled: List[bool] = []
         self._rows = 0
         self._cols = 0
@@ -24,26 +29,26 @@ class TileBrowser(QtWidgets.QWidget):
         self._completed: set[int] = set()
 
         # Top bar: Back + swatches + Mark complete button
-        self.btnBack = QtWidgets.QPushButton("← Back")
+        self.btnBack = QPushButton("← Back")
         self.btnBack.setVisible(False)
-        self.btnMarkComplete = QtWidgets.QPushButton("✓ Mark Complete")
+        self.btnMarkComplete = QPushButton("✓ Mark Complete")
         self.btnMarkComplete.setVisible(False)
-        self.btnMarkComplete.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 6px 12px; font-weight: 600; }")
-        self.title = QtWidgets.QLabel("")
-        self.title.setStyleSheet("font-weight: 600;")
+        self.btnMarkComplete.setProperty("success", True)  # Use dark theme success button style
+        self.title = QLabel("")
+        self.title.setProperty("heading", True)  # Use dark theme heading style
         self.groups = GroupBar()
         self.groups.setVisible(False)  # Hidden by default (grid view)
         self.groups.eraserChanged.connect(self._on_eraser_changed)
 
-        top = QtWidgets.QHBoxLayout()
+        top = QHBoxLayout()
         top.addWidget(self.btnBack)
         top.addSpacing(12)
-        header = QtWidgets.QHBoxLayout()
+        header = QHBoxLayout()
         header.addWidget(self.title)
         header.addStretch(1)
         header.addWidget(self.btnMarkComplete)
 
-        topwrap = QtWidgets.QVBoxLayout()
+        topwrap = QVBoxLayout()
         topwrap.setContentsMargins(0,0,0,0)
         topwrap.setSpacing(4)
         topwrap.addLayout(header)
@@ -55,11 +60,11 @@ class TileBrowser(QtWidgets.QWidget):
         self.grid = TileGridView(tile_px=self.tile_px)
         self.detail = TileDetailView(brush_radius=10)
 
-        self.stack = QtWidgets.QStackedLayout()
+        self.stack = QStackedLayout()
         self.stack.addWidget(self.grid)    # 0
         self.stack.addWidget(self.detail)  # 1
 
-        layout = QtWidgets.QVBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.addLayout(top)
         layout.addLayout(self.stack, 1)
 
@@ -71,7 +76,7 @@ class TileBrowser(QtWidgets.QWidget):
         self.groups.activeChanged.connect(self._on_group_changed)
 
         # keyboard focus for number hotkeys
-        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._current_idx = None
 
@@ -188,14 +193,14 @@ class TileBrowser(QtWidgets.QWidget):
 
 
     # ---- hotkeys 0..9 to toggle active group or 'e' to toggle eraser ----
-    def keyPressEvent(self, e: QtGui.QKeyEvent):
+    def keyPressEvent(self, e: QKeyEvent):
         key = e.key()
-        if QtCore.Qt.Key.Key_0 <= key <= QtCore.Qt.Key.Key_9:
-            gid = key - QtCore.Qt.Key.Key_0
+        if Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
+            gid = key - Qt.Key.Key_0
             self.groups.set_eraser(False)  # numbers always paint
             self.groups.set_active(-1 if self.groups.active() == gid else gid)
             e.accept(); return
-        if key == QtCore.Qt.Key.Key_E:
+        if key == Qt.Key.Key_E:
             self.groups.set_eraser(not self.groups.eraser())
             e.accept(); return
         super().keyPressEvent(e)
