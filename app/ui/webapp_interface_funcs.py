@@ -57,6 +57,7 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
     
     Args:
         web_app_url: URL of the Google Apps Script web app
+        user: Username requesting the image
     
     Returns:
         Dictionary with either:
@@ -164,13 +165,13 @@ def upload_tiles_batch(base_name: str,
     return res
 
 
-def skip_image(file_id: Optional[str] = None, web_app_url: str = WEB_APP_URL) -> None:
+def skip_image(web_app_url: str = WEB_APP_URL, file_id: Optional[str] = None) -> None:
     """
     Skip the current image in the queue.
     
     Args:
-        file_id: ID of the file to skip
         web_app_url: URL of the Google Apps Script web app
+        file_id: ID of the file to skip
     
     Raises:
         requests.RequestException: If the request fails
@@ -178,13 +179,13 @@ def skip_image(file_id: Optional[str] = None, web_app_url: str = WEB_APP_URL) ->
     requests.post(web_app_url, json={"action": "skip", "fileId": file_id}, timeout=30)
 
 
-def mark_image_done(file_id: Optional[str] = None, web_app_url: str = WEB_APP_URL) -> None:
+def mark_image_done(web_app_url: str = WEB_APP_URL, file_id: Optional[str] = None) -> None:
     """
     Mark the current image as done in the queue.
     
     Args:
-        file_id: ID of the file to mark as done
         web_app_url: URL of the Google Apps Script web app
+        file_id: ID of the file to mark as done
     
     Raises:
         requests.RequestException: If the request fails
@@ -198,6 +199,7 @@ def get_user_list(web_app_url: str = WEB_APP_URL) -> list:
     
     Args:
         web_app_url: URL of the Google Apps Script web app 
+
     Returns:
         List of user dictionaries
     """
@@ -213,6 +215,7 @@ def clean_exit(web_app_url: str = WEB_APP_URL, file_id: Optional[str] = None) ->
     
     Args:
         web_app_url: URL of the Google Apps Script web app
+        file_id: Optional ID of the current file being processed
     """
     try:
         requests.post(web_app_url, json={"action": "clean_exit", "fileId": file_id}, timeout=10)
@@ -220,14 +223,16 @@ def clean_exit(web_app_url: str = WEB_APP_URL, file_id: Optional[str] = None) ->
         pass  # Ignore errors on exit
 
 
-def create_new_user(name: str, web_app_url: str = WEB_APP_URL) -> bool:
+def create_new_user(web_app_url: str = WEB_APP_URL, name: Optional[str] = None) -> bool:
     """
     Create a new user in the web app.
     
     Args:
-        name: Name of the new user
         web_app_url: URL of the Google Apps Script web app
+        name: Name of the new user
     """
+    if name is None:
+        return False
     r = requests.post(web_app_url, json={"action": "create_user", "name": name}, timeout=30)
     r.raise_for_status()
     data = r.json()

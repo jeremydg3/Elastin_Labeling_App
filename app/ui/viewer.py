@@ -36,6 +36,7 @@ class Worker(QtCore.QObject):
 
     @QtCore.pyqtSlot()
     def run(self):
+        """Run the callable and emit finished or error signals."""
         try:
             res = self._fn(*self._args, **self._kwargs)
             self.finished.emit(res)
@@ -55,7 +56,6 @@ class MainWindow(QtWidgets.QWidget):
     def __init__(self, tile_size: int = TILE_SIZE):
         super().__init__()
         self.setWindowTitle("Elastin Queue Tile Viewer")
-        # self.setWindowIcon(QIcon(r"app/assets/logo.png"))
         self.web_app_url = WEB_APP_URL
         self.tile_size = tile_size
 
@@ -94,10 +94,14 @@ class MainWindow(QtWidgets.QWidget):
         self.btnSkip.clicked.connect(self.on_skip)
         self._set_work_buttons_enabled(False)
     
+    
     def show_user_selection(self):
         """
         Show user selection dialog on startup.
         Returns True if user was selected, False if cancelled.
+
+        Raises:
+            Exception: If user selection fails.
         """
         try:
             # Show loading while fetching user list
@@ -128,13 +132,16 @@ class MainWindow(QtWidgets.QWidget):
             )
             return False
 
+
     # ------------------ Actions ------------------
     def on_next(self):
+        """Fetch next image from web app, split into tiles, and display in grid."""
+
         # Clear current view immediately
         self.view.set_title("")
         self.view.set_tiles_with_flags([], [], layout=(0, 0))
 
-        self._busy(True, "Fetching image bytes... 'c' or 'a' for easter egg (:")
+        self._busy(True, "Fetching image bytes...")
         self.status.setText("Fetching image bytes...")
 
         def _task_fetch():
@@ -179,6 +186,7 @@ class MainWindow(QtWidgets.QWidget):
             self._set_work_buttons_enabled(True)
 
         self._run_in_thread(_task_fetch, on_result=_on_result, on_error=self._show_error)
+
 
     def on_done(self):
         if not self.current:
@@ -229,6 +237,7 @@ class MainWindow(QtWidgets.QWidget):
 
         self._run_in_thread(_task_skip, on_result=_on_skipped, on_error=self._show_error)
 
+
     def mark_done(self):
         if not self.current:
             return
@@ -236,6 +245,7 @@ class MainWindow(QtWidgets.QWidget):
         mark_image_done(file_id, self.web_app_url)
         self.current = None
         self._set_work_buttons_enabled(False)
+
 
     def closeEvent(self, event: QtGui.QCloseEvent):
         def _task_clean_exit():
@@ -245,53 +255,15 @@ class MainWindow(QtWidgets.QWidget):
             self._run_in_thread(_task_clean_exit)
         event.accept()
 
-    # def upload_file_to_queue(self, path: str):
-    #     with open(path, "rb") as f:
-    #         raw = f.read()
-    #     b64 = base64.b64encode(raw).decode("ascii")
-    #     mime, _ = mimetypes.guess_type(path)
-    #     payload = {
-    #         "action": "upload",
-    #         "filename": os.path.basename(path),
-    #         "mimeType": mime or "application/octet-stream",
-    #         "b64": b64,
-    #     }
-    #     r = requests.post(WEB_APP_URL, json=payload, timeout=120)
-    #     r.raise_for_status()
-    #     res = r.json()
-    #     if not res.get("ok"):
-    #         raise RuntimeError(f"Upload failed: {res}")
-    #     return res["fileId"], res["fileName"]
-    
-
-    # def on_upload_clicked(self):
-    #     path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select image to upload",
-    #                                                     "", "Images (*.tif *.tiff *.png *.jpg *.jpeg)")
-    #     if not path:
-    #         return
-    #     try:
-    #         self._busy(True)
-    #         file_id, file_name = self.upload_file_to_queue(path)
-    #         QtWidgets.QMessageBox.information(self, "Uploaded",
-    #             f"Uploaded:\n{file_name}\n(fileId: {file_id})\nIt is now in the queue.")
-    #     except Exception as e:
-    #         QtWidgets.QMessageBox.critical(self, "Upload failed", str(e))
-    #     finally:
-    #         self._busy(False)
-
 
     # ------------------ Helpers ------------------
     def _busy(self, yes: bool, action_text: str = "Processing..."):
         if yes:
             if self._busy_depth == 0:
                 # Create and show loading dialog
-                self.loading_dialog = LoadingDialog(self, message=action_text)
-                self.loading_dialog.show()
-                
-            self._busy_depth += 1
-        else:
-            if self._busy_depth > 0:
+                self.loading_dialog = LoadingDialog(self, message=action_text +  "'c' or 'a' for easter egg (:)")
                 self._busy_depth -= 1
+                self.loading_dialog.show()
             if self._busy_depth == 0:
                 # Stop animation and close dialog
                 if hasattr(self, 'loading_dialog'):
@@ -306,10 +278,21 @@ class MainWindow(QtWidgets.QWidget):
         self.btnDone.setEnabled(self._busy_depth == 0 and self.current is not None)
         self.btnSkip.setEnabled(self._busy_depth == 0 and self.current is not None)
 
+
     def _run_in_thread(self, fn: Callable, args: Optional[tuple] = None, kwargs: Optional[dict] = None,
                        on_result: Optional[Callable[[Any], None]] = None,
                        on_error: Optional[Callable[[str], None]] = None):
-        """Run fn in a background QThread; ensure busy state is cleared when thread ends."""
+        """
+        Run function fn in a background QThread; ensure busy state is cleared when thread ends.
+
+        Args:
+            fn: The function to run in the background.
+            args: Arguments to pass to the function.
+            kwargs: Keyword arguments to pass to the function.
+            on_result: Callback for successful completion.
+            on_error: Callback for errors.
+        """
+        
         args = args or ()
         kwargs = kwargs or {}
         thread = QtCore.QThread(self)
@@ -344,19 +327,41 @@ class MainWindow(QtWidgets.QWidget):
         thread.finished.connect(_thread_finished)
         thread.start()
 
+
     def _show_error(self, message: str):
+        """Display an error message box and update status label.
+
+        Args:
+            message: The error message to display.
+        """
         QtWidgets.QMessageBox.critical(self, "Error", message)
         self.status.setText(message)
 
+
     def _set_work_buttons_enabled(self, enabled: bool):
+        """Enable or disable the Done and Skip buttons.
+
+        Args:
+            enabled: True to enable the buttons, False to disable them.
+        """
         self.btnDone.setEnabled(enabled)
         self.btnSkip.setEnabled(enabled)
+
 
     @staticmethod
     def _to_rgb_uint8(arr: np.ndarray) -> np.ndarray:
         """
         Converts tifffile output to RGB uint8.
         Handles grayscale, uint16, planar (C,H,W), and channel-order.
+
+        Args:
+            arr: Input image array from tifffile
+        
+        Returns:
+            RGB uint8 image array
+
+        Raises:
+            ValueError: If the image shape is unsupported for RGB conversion.
         """
         # Planar to interleaved if needed: (C,H,W) -> (H,W,C)
         if arr.ndim == 3 and arr.shape[0] in (1, 3, 4) and arr.shape[2] not in (3, 4):
@@ -388,9 +393,17 @@ class MainWindow(QtWidgets.QWidget):
 
         raise ValueError(f"Unsupported image shape for RGB conversion: {arr8.shape}")
 
+
     @staticmethod
-    def _split_into_tiles_with_padding(img_rgb: np.ndarray, tile: int = 255, pad_value: int = 0):
+    def _split_into_tiles_with_padding(img_rgb: np.ndarray, tile: int = TILE_SIZE, pad_value: int = 0):
         """
+        Split an RGB image into tiles of given size, padding partial edge tiles.
+
+        Args:
+            img_rgb: Input RGB uint8 image array
+            tile: Size of square tiles (default 255)
+            pad_value: Value to use for padding (default 0)
+
         Returns:
           tiles: List[(tile,tile,3) uint8]
           enabled: List[bool] (True = full tile; False = partial edge tile)
