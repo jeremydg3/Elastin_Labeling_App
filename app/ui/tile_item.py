@@ -17,7 +17,6 @@ class TileItem(QGraphicsObject):
         if TileItem._badge_icon is not None:
             return TileItem._badge_icon
         try:
-            # icon_path = Path(__file__).resolve().parent.parent / "assets" / "complete_icon.png"
             icon_path = os.path.join(basedir, "assets", "complete_icon.png")
             pm = QPixmap(icon_path)
             if not pm.isNull():
@@ -120,6 +119,7 @@ class TileItem(QGraphicsObject):
                 painter.drawLine(QPointF(x0, y0), QPointF(x1, y1))
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
             painter.restore()
+            
         elif self.working:
             # working overlay (semi-transparent orange) + working badge
             painter.fillRect(self.boundingRect(), QColor(255, 152, 0, 110))

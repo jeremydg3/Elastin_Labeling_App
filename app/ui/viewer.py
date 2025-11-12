@@ -66,9 +66,16 @@ class MainWindow(QWidget):
         self.view = TileBrowser(tile_px=self.tile_size)  # from tile_grid_view.py
         self.btnNext = QPushButton("Get Next")
         self.btnNext.setProperty("primary", True)  # Use primary button style
+        self.btnNext.setToolTip("Fetch the next image from the queue")
+        self.btnNext.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btnDone = QPushButton("Mark Done")
         self.btnDone.setProperty("success", True)  # Use success button style
+        self.btnDone.setToolTip("Mark the current image as done")
+        self.btnDone.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btnSkip = QPushButton("Skip Image")
+        self.btnSkip.setProperty("warning", True)  # Use warning button style
+        self.btnSkip.setToolTip("Skip the current image")
+        self.btnSkip.setCursor(Qt.CursorShape.PointingHandCursor)
         self.status = QLabel("")
         self._busy_depth = 0
         self.status.setTextFormat(Qt.TextFormat.PlainText)

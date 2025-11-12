@@ -32,12 +32,18 @@ class TileBrowser(QWidget):
         # Top bar: Back + swatches + Mark complete button
         self.btnBack = QPushButton("← Back")
         self.btnBack.setVisible(False)
+        self.btnBack.setToolTip("Return to tile grid view")
+        self.btnBack.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btnMarkComplete = QPushButton("✓ Mark Complete")
         self.btnMarkComplete.setVisible(False)
         self.btnMarkComplete.setProperty("success", True)  # Use dark theme success button style
+        self.btnMarkComplete.setToolTip("Mark this tile as complete")
+        self.btnMarkComplete.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btnMarkWorking = QPushButton("⧗ Mark Working")
         self.btnMarkWorking.setVisible(False)
         self.btnMarkWorking.setProperty("working", True)  # Use dark theme working button style
+        self.btnMarkWorking.setToolTip("Mark this tile as 'working on it'")
+        self.btnMarkWorking.setCursor(Qt.CursorShape.PointingHandCursor)
         self.title = QLabel("")
         self.title.setProperty("heading", True)  # Use dark theme heading style
         self.groups = GroupBar()
@@ -76,6 +82,7 @@ class TileBrowser(QWidget):
         # wiring
         self.grid.tileChosen.connect(self._on_tile_clicked)
         self.grid.toggleComplete.connect(self._on_grid_toggle_complete)
+
         # Connect working toggle if available on grid
         if hasattr(self.grid, 'toggleWorking'):
             self.grid.toggleWorking.connect(self._on_grid_toggle_working)
@@ -83,6 +90,7 @@ class TileBrowser(QWidget):
         self.btnMarkComplete.clicked.connect(self._on_mark_complete)
         self.btnMarkWorking.clicked.connect(self._on_mark_working)
         self.groups.activeChanged.connect(self._on_group_changed)
+
         # Connect detail view firstPaintStroke for auto-marking as working
         self.detail.firstPaintStroke.connect(self._on_first_paint_stroke)
 
@@ -176,16 +184,19 @@ class TileBrowser(QWidget):
             if m is not None:
                 self._masks[self._current_idx] = m
             # toggle completion state and update grid overlays
-            if self._current_idx in self._completed:
+            if self._current_idx in self._completed: # If already completed, unmark
                 self._completed.remove(self._current_idx)
                 self.btnMarkComplete.setText("✓ Mark Complete")
-            else:
+            else: # Mark as complete
                 self._completed.add(self._current_idx)
                 self.btnMarkComplete.setText("Unmark Complete")
                 self.tileCompleted.emit(self._current_idx)
+                if self._current_idx in self._working: # Remove from working if completed
+                    self._working.remove(self._current_idx)
+                    self.btnMarkWorking.setText("⧗ Mark Working")
             self.grid.set_completed(self._completed)
-            if hasattr(self.grid, 'set_working'):
-                self.grid.set_working(self._working)
+            # if hasattr(self.grid, 'set_working'):
+            self.grid.set_working(self._working)
             self._show_grid()
 
     def _on_mark_working(self):
@@ -195,14 +206,17 @@ class TileBrowser(QWidget):
             if m is not None:
                 self._masks[self._current_idx] = m
             # toggle working state and update grid overlays
-            if self._current_idx in self._working:
+            if self._current_idx in self._working: # If already working, unmark
                 self._working.remove(self._current_idx)
                 self.btnMarkWorking.setText("⧗ Mark Working")
-            else:
+            else: # Mark as working
                 self._working.add(self._current_idx)
                 self.btnMarkWorking.setText("Unmark Working")
-            if hasattr(self.grid, 'set_working'):
-                self.grid.set_working(self._working)
+                if self._current_idx in self._completed: # Remove from completed if working
+                    self._completed.remove(self._current_idx)
+                    self.btnMarkComplete.setText("✓ Mark Complete")
+            # if hasattr(self.grid, 'set_working'):
+            self.grid.set_working(self._working)
             self.grid.set_completed(self._completed)
             self._show_grid()
 
@@ -221,8 +235,8 @@ class TileBrowser(QWidget):
         self._working.add(self._current_idx)
         self.btnMarkWorking.setText("Unmark Working")
         # Update grid overlays
-        if hasattr(self.grid, 'set_working'):
-            self.grid.set_working(self._working)
+        # if hasattr(self.grid, 'set_working'):
+        self.grid.set_working(self._working)
         self.grid.set_completed(self._completed)
 
 
@@ -248,9 +262,9 @@ class TileBrowser(QWidget):
             self._completed.remove(idx)
         else:
             self._completed.add(idx)
+        # if hasattr(self.grid, 'set_working'):
+        self.grid.set_working(self._working)
         self.grid.set_completed(self._completed)
-        if hasattr(self.grid, 'set_working'):
-            self.grid.set_working(self._working)
         # If currently viewing this tile in detail, update button label
         if self._current_idx == idx and self.btnMarkComplete.isVisible():
             self.btnMarkComplete.setText("Unmark Complete" if idx in self._completed else "✓ Mark Complete")
@@ -261,8 +275,8 @@ class TileBrowser(QWidget):
             self._working.remove(idx)
         else:
             self._working.add(idx)
-        if hasattr(self.grid, 'set_working'):
-            self.grid.set_working(self._working)
+        # if hasattr(self.grid, 'set_working'):
+        self.grid.set_working(self._working)
         self.grid.set_completed(self._completed)
         # If currently viewing this tile in detail, update button label
         if self._current_idx == idx and self.btnMarkWorking.isVisible():
