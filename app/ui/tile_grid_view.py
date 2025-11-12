@@ -1,7 +1,6 @@
 from typing import Optional
-from PyQt6 import QtGui
 
-from PyQt6.QtGui import QPixmap, QPainter, QResizeEvent
+from PyQt6.QtGui import QPixmap, QPainter, QResizeEvent, QColor
 from PyQt6.QtCore import pyqtSignal, Qt, QPoint
 from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QMenu
 
@@ -27,7 +26,7 @@ class TileGridView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setBackgroundBrush(QtGui.QColor(get_tile_grid_background()))
+        self.setBackgroundBrush(QColor(get_tile_grid_background()))
         self.tile_px = tile_px
         self.pad = pad
         self._pixmaps: list[QPixmap] = []
