@@ -262,8 +262,12 @@ class MainWindow(QtWidgets.QWidget):
             if self._busy_depth == 0:
                 # Create and show loading dialog
                 self.loading_dialog = LoadingDialog(self, message=action_text)
-                self._busy_depth -= 1
                 self.loading_dialog.show()
+                
+            self._busy_depth += 1
+        else:
+            if self._busy_depth > 0:
+                self._busy_depth -= 1
             if self._busy_depth == 0:
                 # Stop animation and close dialog
                 if hasattr(self, 'loading_dialog'):
