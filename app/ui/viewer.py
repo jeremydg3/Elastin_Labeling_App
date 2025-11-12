@@ -241,7 +241,7 @@ class MainWindow(QWidget):
         file_id = self.current["fileId"]
 
         def _task_skip():
-            skip_image(file_id, self.web_app_url)
+            skip_image(self.web_app_url, file_id)
             return True
 
         def _on_skipped(_res):
@@ -254,7 +254,7 @@ class MainWindow(QWidget):
         if not self.current:
             return
         file_id = self.current["fileId"]
-        mark_image_done(file_id, self.web_app_url)
+        mark_image_done(self.web_app_url, file_id)
         self.current = None
         self._set_work_buttons_enabled(False)
 
