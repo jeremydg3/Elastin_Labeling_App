@@ -32,6 +32,7 @@ class LoadingDialog(QtWidgets.QDialog):
         self._loading_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         
         # Message label
+        message = message + "'c' or 'a' for easter egg (:"
         self._message_label = QtWidgets.QLabel(message)
         self._message_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         

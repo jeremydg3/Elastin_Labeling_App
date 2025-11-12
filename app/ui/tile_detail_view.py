@@ -66,6 +66,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._sc_redo = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Y'), self)
         self._sc_redo.activated.connect(self.redo)
 
+
     # ---- public API ----
     def set_eraser(self, active: bool):
         self._eraser = bool(active)
@@ -74,7 +75,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         # Update cursor ring color (eraser takes precedence)
         self._refresh_cursor_pen()
 
-    # --- tweak existing set_active_group to play nice with eraser ---
+
     def set_active_group(self, gid: int):
         """-1 to deactivate."""
         self._active_group = gid
@@ -82,6 +83,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._cursor_item.setVisible(self._eraser or gid != -1)
         # Update cursor color to match active group when not erasing
         self._refresh_cursor_pen()
+
 
     def _refresh_cursor_pen(self):
         """Set cursor ring color based on eraser/group state."""
@@ -189,6 +191,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._redo_stack.clear()
         self._stroke_record = None
 
+
     def set_mask(self, mask: np.ndarray | None):
         """mask: uint8 HxW, values {0..9, 255}, or None -> create empty"""
         if self._pix is None:
@@ -206,8 +209,10 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._redo_stack.clear()
         self._stroke_record = None
 
+
     def get_mask(self):
         return None if self._mask is None else self._mask.copy()
+
 
     def _pixmap_to_hsv_value(self, pixmap: QtGui.QPixmap, channel: str) -> QtGui.QPixmap:
         """Convert a QPixmap to HSV and extract the specified channel as grayscale."""
@@ -257,6 +262,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         # Convert back to QPixmap
         return np_to_qpixmap(viridis_rgb)
 
+
     @staticmethod
     def viridis_colormap(grey: np.ndarray) -> np.ndarray:
         # Apply viridis colormap to the channel
@@ -289,6 +295,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         # Convert to uint8 RGB
         viridis_rgb = (interpolated * 255).astype(np.uint8)
         return viridis_rgb
+
 
     def toggle_hsv_display(self, channel: str):
         """Toggle between RGB and HSV Value channel display."""
@@ -328,6 +335,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
             self._pix_hsv_value = None
             self._base_item.setPixmap(self._pix_rgb)
 
+
     # ---- overlay composition ----
     def _rebuild_overlay(self):
         """Rebuild overlay pixmap from mask array (fast path)."""
@@ -352,10 +360,12 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self._overlay_pm = QtGui.QPixmap.fromImage(qimg)
         self._overlay_item.setPixmap(self._overlay_pm)
 
+
     # ---- painting ----
     def _img_pos_from_view(self, ev: QtGui.QMouseEvent | QtGui.QHoverEvent):
         sp = self.mapToScene(ev.position().toPoint())
         return sp.x(), sp.y()
+
 
     # ---- events ----
     def mousePressEvent(self, e: QtGui.QMouseEvent):
@@ -409,6 +419,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
             e.accept()
             return
         super().mouseMoveEvent(e)
+
 
     def mouseReleaseEvent(self, e: QtGui.QMouseEvent):
         if e.button() == QtCore.Qt.MouseButton.LeftButton and self._painting:
@@ -481,6 +492,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
                 e.accept(); return
         super().keyPressEvent(e)
 
+
     def wheelEvent(self, event: QtGui.QWheelEvent):
         # If Ctrl is held, use wheel to change brush size instead of zooming
         try:
@@ -518,6 +530,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
         self.scale(factor, factor)
 
+
     # ---- undo/redo API ----
     def undo(self):
         if self._painting:
@@ -531,6 +544,7 @@ class TileDetailView(QtWidgets.QGraphicsView):
         self.maskChanged.emit()
         # push to redo
         self._redo_stack.append(change)
+
 
     def redo(self):
         if self._painting:

@@ -79,6 +79,7 @@ class TileBrowser(QtWidgets.QWidget):
     def set_title(self, text: str):
         self.title.setText(text)
 
+
     def set_tiles_with_flags(self, tiles_np: List[np.ndarray], enabled: List[bool], layout: Tuple[int,int]):
         # New image: reset all per-image state
         self.tiles_pix = [np_to_qpixmap(t) for t in tiles_np]
@@ -90,8 +91,10 @@ class TileBrowser(QtWidgets.QWidget):
         self.grid.populate_fixed(self.tiles_pix, self.enabled, self._rows, self._cols, completed=self._completed)
         self._show_grid()
 
+
     def set_tiles(self, tiles_np: List[np.ndarray], layout: Tuple[int,int]):
         self.set_tiles_with_flags(tiles_np, [True]*len(tiles_np), layout)
+
 
     def get_mask_for_tile(self, idx: int) -> np.ndarray:
         """Return saved mask for tile idx, or None if none exists."""
@@ -100,13 +103,16 @@ class TileBrowser(QtWidgets.QWidget):
             return np.full((self.tile_px, self.tile_px), 255, dtype=np.uint8)
         return mask.copy()
 
+
     def get_completed_indices(self) -> List[int]:
         """Return a sorted list of tile indices marked as complete."""
         return sorted(self._completed)
     
+
     # ---- interactions ----
     def _on_eraser_changed(self, on: bool):
         self.detail.set_eraser(on)
+
 
     def _on_tile_clicked(self, idx: int):
         if not self.enabled[idx]: return
@@ -126,6 +132,7 @@ class TileBrowser(QtWidgets.QWidget):
         self.detail.set_active_group(self.groups.active())
         self.detail.set_eraser(self.groups.eraser())
 
+
     def _on_back(self):
         # save mask for current tile
         if self._current_idx is not None:
@@ -133,6 +140,7 @@ class TileBrowser(QtWidgets.QWidget):
             if m is not None:
                 self._masks[self._current_idx] = m
         self._show_grid()
+
 
     def _on_mark_complete(self):
         """Mark current tile as complete and save mask."""
@@ -151,11 +159,13 @@ class TileBrowser(QtWidgets.QWidget):
             self.grid.set_completed(self._completed)
             self._show_grid()
 
+
     def _show_grid(self):
         self.stack.setCurrentIndex(0)
         self.btnBack.setVisible(False)
         self.btnMarkComplete.setVisible(False)
         self.groups.setVisible(False)  # Hide swatch bar in grid view
+
 
     def _on_group_changed(self, gid: int):
         # Only force eraser OFF when a concrete group is selected (gid != -1).
@@ -163,6 +173,7 @@ class TileBrowser(QtWidgets.QWidget):
         if gid != -1 and self.groups.eraser():
             self.groups.set_eraser(False)
         self.detail.set_active_group(gid)
+
 
     def _on_grid_toggle_complete(self, idx: int):
         # Toggle in the browser's source-of-truth set, then push to grid
@@ -174,6 +185,7 @@ class TileBrowser(QtWidgets.QWidget):
         # If currently viewing this tile in detail, update button label
         if self._current_idx == idx and self.btnMarkComplete.isVisible():
             self.btnMarkComplete.setText("Unmark Complete" if idx in self._completed else "✓ Mark Complete")
+
 
     # ---- hotkeys 0..9 to toggle active group or 'e' to toggle eraser ----
     def keyPressEvent(self, e: QtGui.QKeyEvent):

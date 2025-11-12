@@ -7,6 +7,10 @@ basedir = os.path.dirname(__file__)
 
 
 class TileGridView(QtWidgets.QGraphicsView):
+    """
+    A fixed grid view of tiles with context menu support.
+    Emits signals when tiles are clicked or context menu actions are requested.
+    """
     tileChosen = QtCore.pyqtSignal(int)
     toggleComplete = QtCore.pyqtSignal(int)  # request from context menu
 
@@ -24,8 +28,18 @@ class TileGridView(QtWidgets.QGraphicsView):
         self._rows = 0
         self._cols = 0
 
+
     def populate_fixed(self, tiles_pix: list[QtGui.QPixmap], enabled: list[bool], rows: int, cols: int, completed: Optional[set[int]] = None):
-        """Fixed grid layout (rows x cols). No re-arranging on resize."""
+        """
+        Fixed grid layout (rows x cols). No re-arranging on resize.
+        
+        Args:
+            tiles_pix: List of QPixmap tiles
+            enabled: List of booleans indicating if each tile is enabled
+            rows: Number of rows in the grid
+            cols: Number of columns in the grid
+            completed: Optional set of indices that are marked as completed
+        """
         assert rows * cols == len(tiles_pix), "rows*cols must equal number of tiles"
 
         self._pixmaps = tiles_pix[:]
@@ -62,6 +76,7 @@ class TileGridView(QtWidgets.QGraphicsView):
         # Fit once initially
         self._fit_scene()
 
+
     def set_completed(self, completed: set[int]):
         """Update completion overlay for all items based on a set of indices."""
         self._completed_set = set(completed)
@@ -69,6 +84,7 @@ class TileGridView(QtWidgets.QGraphicsView):
             return
         for it in self._items:
             it.set_completed(it.index in self._completed_set)
+
 
     def _on_item_context(self, idx: int, global_pt: QtCore.QPoint):
         # Build a simple context menu to toggle completion
@@ -80,16 +96,15 @@ class TileGridView(QtWidgets.QGraphicsView):
         if chosen == act_toggle:
             self.toggleComplete.emit(idx)
 
+
     def _fit_scene(self):
         scene = self.scene()
         if scene is None or not scene.items():
             return
         self.fitInView(self.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
 
+
     def resizeEvent(self, e: QtGui.QResizeEvent) -> None:
         # DO NOT reflow—just scale the view to fit the fixed scene rect
         self._fit_scene()
         super().resizeEvent(e)
-
-
-

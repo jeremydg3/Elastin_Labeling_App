@@ -94,7 +94,7 @@ class MainWindow(QtWidgets.QWidget):
         self.btnSkip.clicked.connect(self.on_skip)
         self._set_work_buttons_enabled(False)
     
-    
+
     def show_user_selection(self):
         """
         Show user selection dialog on startup.
@@ -261,7 +261,7 @@ class MainWindow(QtWidgets.QWidget):
         if yes:
             if self._busy_depth == 0:
                 # Create and show loading dialog
-                self.loading_dialog = LoadingDialog(self, message=action_text +  "'c' or 'a' for easter egg (:)")
+                self.loading_dialog = LoadingDialog(self, message=action_text)
                 self._busy_depth -= 1
                 self.loading_dialog.show()
             if self._busy_depth == 0:
