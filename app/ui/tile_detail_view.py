@@ -4,7 +4,7 @@ import numpy as np
 from PyQt6.QtGui import (QPixmap, QKeyEvent, QPainter, QColor, 
                          QBrush, QPen, QShortcut, QKeySequence, 
                          QImage, QMouseEvent, QHoverEvent, QWheelEvent)
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsEllipseItem
 
 from group_bar import GROUP_COLORS
@@ -72,6 +72,12 @@ class TileDetailView(QGraphicsView):
         self._sc_undo.activated.connect(self.undo)
         self._sc_redo = QShortcut(QKeySequence('Ctrl+Y'), self)
         self._sc_redo.activated.connect(self.redo)
+
+        # Pulsing animation for mask overlay
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._pulse_overlay)
+        self._pulse_phase = 0.0  # Current phase in the pulse cycle (0.0 to 1.0)
+        self._base_alpha = 110   # Base alpha value for overlay
 
 
     # ---- public API ----
@@ -347,7 +353,7 @@ class TileDetailView(QGraphicsView):
 
 
     # ---- overlay composition ----
-    def _rebuild_overlay(self):
+    def _rebuild_overlay(self, alpha: int | None = None):
         """Rebuild overlay pixmap from mask array (fast path)."""
         if self._mask is None or self._pix is None or self._overlay_item is None:
             return
@@ -355,7 +361,8 @@ class TileDetailView(QGraphicsView):
         # RGBA overlay
         overlay = np.zeros((h, w, 4), dtype=np.uint8)
         # draw each group color with alpha
-        alpha = 110  # semi-transparent
+        if alpha is None:
+            alpha = self._base_alpha  # Use base alpha if not specified
         for gid, hexc in GROUP_COLORS.items():
             sel = (self._mask == gid)
             if not np.any(sel):
@@ -369,6 +376,25 @@ class TileDetailView(QGraphicsView):
         qimg = QImage(overlay.data, w, h, 4*w, QImage.Format.Format_RGBA8888)
         self._overlay_pm = QPixmap.fromImage(qimg)
         self._overlay_item.setPixmap(self._overlay_pm)
+
+
+    def _pulse_overlay(self):
+        """Update overlay opacity in a pulsing pattern (fade in/out ~1 time per second)."""
+        # Increment phase (0.0 to 1.0 over 1 second)
+        self._pulse_phase += 0.05  # 50ms * 0.05 = 1 second per cycle
+        if self._pulse_phase >= 1.0:
+            self._pulse_phase = 0.0
+        
+        # Calculate alpha using a sine wave for smooth pulsing
+        # sin goes from -1 to 1, we map to alpha range (e.g., 60 to 160)
+        import math
+        min_alpha = 60
+        max_alpha = 160
+        alpha_range = max_alpha - min_alpha
+        alpha = int(min_alpha + alpha_range * (0.5 + 0.5 * math.sin(2 * math.pi * self._pulse_phase)))
+        
+        # Rebuild overlay with current alpha
+        self._rebuild_overlay(alpha=alpha)
 
 
     # ---- painting ----
@@ -449,6 +475,9 @@ class TileDetailView(QGraphicsView):
                 # cap history
                 if len(self._undo_stack) > self._max_history:
                     self._undo_stack.pop(0)
+                # Start pulsing animation after completing paint stroke
+                self._pulse_phase = 0.0
+                self._pulse_timer.start(50)  # Update every 50ms (~20 FPS)
             # clear current stroke record
             self._stroke_record = None
             e.accept()

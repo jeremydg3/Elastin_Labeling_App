@@ -13,7 +13,7 @@ from typing import List, Optional, Dict, Any
 
 
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw8mQLmfC5dYQ2Hc41M3d-nTKsxx_oRsgIl_c6iFdpkeoerrrI1OaoIJdbCSkoHPNHDSg/exec"
-
+MAX_ATTEMPTS = 3
 
 def encode_png_b64(tile_rgb: np.ndarray) -> str:
     """
@@ -68,30 +68,33 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
         requests.RequestException: If the request fails
         RuntimeError: If image processing fails
     """
-    # Claim next image from queue
-    r = requests.post(web_app_url, json={"action": "next", "user": user}, timeout=60)
-    r.raise_for_status()
-    data = r.json()
-    
-    if data.get("done"):
-        return {"done": True, "message": data.get("message", "Queue empty.")}
-    
-    # Fetch the raw image bytes
-    fname = data.get("fileName", "(unnamed)")
-    raw_url = f"{web_app_url}?raw={data['fileId']}"
-    rb = requests.get(raw_url, timeout=120)
-    rb.raise_for_status()
-    
-    # Decode base64 -> numpy via tifffile
-    b = base64.b64decode(rb.text)
-    arr = tifffile.imread(io.BytesIO(b))
-    
-    return {
-        "done": False,
-        "data": data,
-        "fname": fname,
-        "img_array": arr,
-    }
+    for _ in range(MAX_ATTEMPTS):
+        # Claim next image from queue
+        r = requests.post(web_app_url, json={"action": "next", "user": user}, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        
+        if data.get("done"):
+            return {"done": True, "message": data.get("message", "Queue empty.")}
+        
+        # Fetch the raw image bytes
+        fname = data.get("fileName", "(unnamed)")
+        raw_url = f"{web_app_url}?raw={data['fileId']}"
+        rb = requests.get(raw_url, timeout=120)
+        rb.raise_for_status()
+        
+        # Decode base64 -> numpy via tifffile
+        b = base64.b64decode(rb.text)
+        arr = tifffile.imread(io.BytesIO(b))
+        
+        return {
+            "done": False,
+            "data": data,
+            "fname": fname,
+            "img_array": arr,
+        }
+    else:
+        raise RuntimeError("Failed to fetch next image after multiple attempts.")
 
 
 def upload_tiles_batch(base_name: str,
