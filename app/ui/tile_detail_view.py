@@ -81,6 +81,11 @@ class TileDetailView(QGraphicsView):
         self._pulse_phase = 0.0  # Current phase in the pulse cycle (0.0 to 1.0)
         self._base_alpha = 110   # Base alpha value for overlay
 
+        # Surrounding tiles for context (8 neighbors in 3x3 grid)
+        self._surrounding_items = []  # List of (base_item, overlay_item) for 8 neighbors
+        self._tile_width = 0
+        self._tile_height = 0
+
 
     # ---- public API ----
     def set_eraser(self, active: bool):
@@ -181,6 +186,10 @@ class TileDetailView(QGraphicsView):
             scene = QGraphicsScene(self)
             self.setScene(scene)
         
+        # Store tile dimensions
+        self._tile_width = pix.width()
+        self._tile_height = pix.height()
+        
         # Store original RGB pixmap and reset display state
         self._pix_rgb = pix
         self._pix = pix
@@ -188,7 +197,10 @@ class TileDetailView(QGraphicsView):
         self._show_h = False  # Always start with RGB view
         self._show_s = False  # Always start with RGB view
         self._show_v = False  # Always start with RGB view
+        # Position center tile at (tile_width, tile_height) to leave room for neighbors
         self._base_item = scene.addPixmap(pix)
+        if self._base_item is not None:
+            self._base_item.setPos(self._tile_width, self._tile_height)
 
         # overlay
         self._overlay_pm = QPixmap(pix.size())
@@ -196,18 +208,111 @@ class TileDetailView(QGraphicsView):
         self._overlay_item = scene.addPixmap(self._overlay_pm)
         if self._overlay_item is not None:
             self._overlay_item.setZValue(10)
+            self._overlay_item.setPos(self._tile_width, self._tile_height)
 
         # cursor back on top
         scene.addItem(self._cursor_item)
 
+        # Clear any previous surrounding tiles
+        self._surrounding_items.clear()
+
         if self._base_item is not None:
-            scene.setSceneRect(self._base_item.boundingRect())
+            # Scene rect encompasses all 9 tiles (3x3 grid)
+            scene.setSceneRect(0, 0, self._tile_width * 3, self._tile_height * 3)
         self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
         # Reset history for new base pixmap
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._stroke_record = None
+
+
+    def set_surrounding_tiles(self, neighbors: list[tuple[QPixmap | None, np.ndarray | None]]):
+        """
+        Set the 8 surrounding tiles for context visualization.
+        neighbors: list of 8 tuples (pixmap, mask) in order: [top-left, top, top-right, left, right, bottom-left, bottom, bottom-right]
+        None entries mean no neighbor exists (edge of grid)
+        """
+        scene = self.scene()
+        if scene is None or len(neighbors) != 8:
+            return
+        
+        # Clear previous surrounding items
+        for base_item, overlay_item in self._surrounding_items:
+            if base_item is not None:
+                scene.removeItem(base_item)
+            if overlay_item is not None:
+                scene.removeItem(overlay_item)
+        self._surrounding_items.clear()
+        
+        # Positions for 8 neighbors: [TL, T, TR, L, R, BL, B, BR]
+        positions = [
+            (0, 0),                                    # top-left
+            (self._tile_width, 0),                     # top
+            (self._tile_width * 2, 0),                 # top-right
+            (0, self._tile_height),                    # left
+            (self._tile_width * 2, self._tile_height), # right
+            (0, self._tile_height * 2),                # bottom-left
+            (self._tile_width, self._tile_height * 2), # bottom
+            (self._tile_width * 2, self._tile_height * 2) # bottom-right
+        ]
+        
+        for i, (pix, mask) in enumerate(neighbors):
+            if pix is None:
+                self._surrounding_items.append((None, None))
+                continue
+            
+            # Create dimmed/greyed version of the tile
+            dimmed_pix = self._create_dimmed_pixmap(pix)
+            base_item = scene.addPixmap(dimmed_pix)
+            if base_item is not None:
+                base_item.setPos(*positions[i])
+                base_item.setZValue(-2)  # Behind center tile
+                base_item.setOpacity(0.5)  # Additional dimming
+            
+            # Create overlay for the mask if it exists
+            overlay_item = None
+            if mask is not None:
+                overlay_pix = self._create_overlay_pixmap(mask, pix.width(), pix.height(), dim=True)
+                overlay_item = scene.addPixmap(overlay_pix)
+                if overlay_item is not None:
+                    overlay_item.setPos(*positions[i])
+                    overlay_item.setZValue(-1)  # Behind center tile but above neighbor base
+                    overlay_item.setOpacity(0.8)  # Dimmed overlay
+            
+            self._surrounding_items.append((base_item, overlay_item))
+    
+    
+    def _create_dimmed_pixmap(self, pix: QPixmap) -> QPixmap:
+        """Create a greyed-out/dimmed version of a pixmap."""
+        img = pix.toImage()
+        for y in range(img.height()):
+            for x in range(img.width()):
+                color = img.pixelColor(x, y)
+                # Convert to grayscale and reduce brightness
+                gray = int(0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue())
+                dimmed = int(gray * 0.6)  # Reduce brightness
+                img.setPixelColor(x, y, QColor(dimmed, dimmed, dimmed, color.alpha()))
+        return QPixmap.fromImage(img)
+    
+    
+    def _create_overlay_pixmap(self, mask: np.ndarray, width: int, height: int, dim: bool = False) -> QPixmap:
+        """Create an overlay pixmap from a mask array."""
+        overlay = np.zeros((height, width, 4), dtype=np.uint8)
+        alpha = 60 if dim else 110  # Dimmed alpha for surrounding tiles
+        
+        for gid, hexc in GROUP_COLORS.items():
+            sel = (mask == gid)
+            if not np.any(sel):
+                continue
+            c = QColor(hexc)
+            overlay[sel, 0] = c.red()
+            overlay[sel, 1] = c.green()
+            overlay[sel, 2] = c.blue()
+            overlay[sel, 3] = alpha
+        
+        qimg = QImage(overlay.data, width, height, 4 * width, QImage.Format.Format_RGBA8888)
+        return QPixmap.fromImage(qimg.copy())  # Copy to avoid data lifetime issues
 
 
     def set_mask(self, mask: np.ndarray | None):
@@ -401,7 +506,8 @@ class TileDetailView(QGraphicsView):
     # ---- painting ----
     def _img_pos_from_view(self, ev: QMouseEvent | QHoverEvent):
         sp = self.mapToScene(ev.position().toPoint())
-        return sp.x(), sp.y()
+        # Adjust for center tile offset
+        return sp.x() - self._tile_width, sp.y() - self._tile_height
 
 
     # ---- events ----
@@ -414,9 +520,9 @@ class TileDetailView(QGraphicsView):
             # where in the image (scene) did we click?
             x, y = self._img_pos_from_view(e)
 
-            # show/update brush cursor at press location
+            # show/update brush cursor at press location (in scene coordinates)
             r = int(self._brush_radius)
-            self._cursor_item.setRect(x - r, y - r, 2*r, 2*r)
+            self._cursor_item.setRect(x + self._tile_width - r, y + self._tile_height - r, 2*r, 2*r)
             self._cursor_item.setVisible(True)
 
             # begin stroke + lay down initial dab
@@ -450,10 +556,10 @@ class TileDetailView(QGraphicsView):
 
 
     def mouseMoveEvent(self, e: QMouseEvent):
-        # move brush cursor
+        # move brush cursor (in scene coordinates)
         x, y = self._img_pos_from_view(e)
         r = self._brush_radius
-        self._cursor_item.setRect(x - r, y - r, 2*r, 2*r)
+        self._cursor_item.setRect(x + self._tile_width - r, y + self._tile_height - r, 2*r, 2*r)
 
         if self._painting and (self._eraser or self._active_group != -1):
             self._paint_at(x, y)

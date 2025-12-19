@@ -148,6 +148,11 @@ class TileBrowser(QWidget):
         self._current_idx = idx
         self.detail.set_base_pixmap(self.tiles_pix[idx])
         self.detail.set_mask(self._masks.get(idx))
+        
+        # Set surrounding tiles for context
+        neighbors = self._get_surrounding_tiles(idx)
+        self.detail.set_surrounding_tiles(neighbors)
+        
         self.btnBack.setVisible(True)
         self.btnMarkComplete.setVisible(True)
         self.btnMarkWorking.setVisible(True)
@@ -166,6 +171,33 @@ class TileBrowser(QWidget):
         # sync current states
         self.detail.set_active_group(self.groups.active())
         self.detail.set_eraser(self.groups.eraser())
+
+
+    def _get_surrounding_tiles(self, idx: int) -> list[tuple]:
+        """
+        Get the 8 surrounding tiles for a given index.
+        Returns list of 8 tuples (pixmap, mask) in order: [TL, T, TR, L, R, BL, B, BR]
+        Returns (None, None) for positions outside the grid.
+        """
+        row = idx // self._cols
+        col = idx % self._cols
+        
+        neighbors = []
+        # Order: [top-left, top, top-right, left, right, bottom-left, bottom, bottom-right]
+        offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+        
+        for dr, dc in offsets:
+            nr, nc = row + dr, col + dc
+            # Check if neighbor is within grid bounds
+            if 0 <= nr < self._rows and 0 <= nc < self._cols:
+                n_idx = nr * self._cols + nc
+                pix = self.tiles_pix[n_idx] if n_idx < len(self.tiles_pix) else None
+                mask = self._masks.get(n_idx)
+                neighbors.append((pix, mask))
+            else:
+                neighbors.append((None, None))
+        
+        return neighbors
 
 
     def _on_back(self):
