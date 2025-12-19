@@ -15,6 +15,8 @@ from utils import np_to_qpixmap
 basedir = os.path.abspath(os.path.dirname(__file__))
 
 MAX_HISTORY = 50
+MIN_ALPHA = 80
+MAX_ALPHA = 160
 
 class TileDetailView(QGraphicsView):
     """
@@ -362,7 +364,9 @@ class TileDetailView(QGraphicsView):
         overlay = np.zeros((h, w, 4), dtype=np.uint8)
         # draw each group color with alpha
         if alpha is None:
-            alpha = self._base_alpha  # Use base alpha if not specified
+            # Calculate alpha from current pulse phase
+            alpha_range = MAX_ALPHA - MIN_ALPHA
+            alpha = int(MIN_ALPHA + alpha_range * (0.5 + 0.5 * np.sin(2 * np.pi * self._pulse_phase)))
         for gid, hexc in GROUP_COLORS.items():
             sel = (self._mask == gid)
             if not np.any(sel):
@@ -387,11 +391,8 @@ class TileDetailView(QGraphicsView):
         
         # Calculate alpha using a sine wave for smooth pulsing
         # sin goes from -1 to 1, we map to alpha range (e.g., 60 to 160)
-        import math
-        min_alpha = 60
-        max_alpha = 160
-        alpha_range = max_alpha - min_alpha
-        alpha = int(min_alpha + alpha_range * (0.5 + 0.5 * math.sin(2 * math.pi * self._pulse_phase)))
+        alpha_range = MAX_ALPHA - MIN_ALPHA
+        alpha = int(MIN_ALPHA + alpha_range * (0.5 + 0.5 * np.sin(2 * np.pi * self._pulse_phase)))
         
         # Rebuild overlay with current alpha
         self._rebuild_overlay(alpha=alpha)
@@ -420,6 +421,8 @@ class TileDetailView(QGraphicsView):
 
             # begin stroke + lay down initial dab
             self._painting = True
+            # Stop pulsing animation while painting
+            self._pulse_timer.stop()
             # Begin new stroke record and clear redo chain
             self._stroke_record = {}
             self._redo_stack.clear()
@@ -476,7 +479,7 @@ class TileDetailView(QGraphicsView):
                 if len(self._undo_stack) > self._max_history:
                     self._undo_stack.pop(0)
                 # Start pulsing animation after completing paint stroke
-                self._pulse_phase = 0.0
+                # self._pulse_phase = 0.0
                 self._pulse_timer.start(50)  # Update every 50ms (~20 FPS)
             # clear current stroke record
             self._stroke_record = None
