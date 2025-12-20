@@ -15,8 +15,12 @@ from utils import np_to_qpixmap
 basedir = os.path.abspath(os.path.dirname(__file__))
 
 MAX_HISTORY = 50
+
 MIN_ALPHA = 80
 MAX_ALPHA = 160
+
+MAX_ZOOM = 10.0
+MIN_ZOOM = 0.1
 
 class TileDetailView(QGraphicsView):
     """
@@ -678,6 +682,16 @@ class TileDetailView(QGraphicsView):
 
         # Default: zoom view
         factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
+        # Get current zoom level
+        current_zoom = self.transform().m11()  # horizontal scale factor
+        new_zoom = current_zoom * factor
+        
+        # Clamp zoom to MIN_ZOOM and MAX_ZOOM range
+        if new_zoom < MIN_ZOOM:
+            factor = MIN_ZOOM / current_zoom
+        elif new_zoom > MAX_ZOOM:
+            factor = MAX_ZOOM / current_zoom
+        
         self.scale(factor, factor)
 
 
