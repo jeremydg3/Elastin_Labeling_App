@@ -221,7 +221,9 @@ class MainWindow(QWidget):
                                masks=masks_to_upload,
                                source_img_fname=f"{self.image_title}",
                                orig_indices=completed_idxs,
-                               author=self.user,)
+                               author=self.user,
+                               save_locally=True,
+                               local_output_dir="labeled_tiles")
             return {"count": len(tiles_to_upload)}
 
         def _on_uploaded(_res):

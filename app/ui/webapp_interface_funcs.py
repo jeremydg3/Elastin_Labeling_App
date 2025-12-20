@@ -3,12 +3,14 @@ Web App Interface Functions
 Functions for communicating with the Google Apps Script web app backend.
 """
 import io
+import os
 import csv
 import base64
 import numpy as np
 import requests
 import cv2
 import tifffile
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 
@@ -97,13 +99,53 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
         raise RuntimeError("Failed to fetch next image after multiple attempts.")
 
 
+def save_tiles_locally(base_name: str,
+                      tiles_rgb: List[np.ndarray],
+                      masks: List[np.ndarray],
+                      orig_indices: Optional[List[int]] = None,
+                      output_dir: str = "labeled_tiles") -> None:
+    """
+    Save tiles and masks locally to disk.
+    
+    Args:
+        base_name: Base name for the files (image title)
+        tiles_rgb: List of RGB tile arrays
+        masks: List of mask arrays (same length as tiles_rgb)
+        orig_indices: Optional list of original tile indices for naming
+        output_dir: Directory to save the tiles (default: "labeled_tiles")
+    """
+    assert len(tiles_rgb) == len(masks), "tiles_rgb and masks must have same length"
+    
+    # Create output directory structure
+    base_path = Path(output_dir)
+    images_dir = base_path / "images"
+    masks_dir = base_path / "masks"
+    
+    images_dir.mkdir(parents=True, exist_ok=True)
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save each tile and mask
+    for i in range(len(tiles_rgb)):
+        i_orig = orig_indices[i] if orig_indices is not None else i
+        
+        # Save PNG image
+        png_path = images_dir / f"{base_name}_tile_{i_orig:04d}.png"
+        cv2.imwrite(str(png_path), cv2.cvtColor(tiles_rgb[i], cv2.COLOR_RGB2BGR))
+        
+        # Save CSV mask
+        csv_path = masks_dir / f"{base_name}_tile_{i_orig:04d}.csv"
+        np.savetxt(str(csv_path), masks[i], delimiter=",", fmt="%d")
+
+
 def upload_tiles_batch(base_name: str,
                        tiles_rgb: List[np.ndarray],
                        masks: List[np.ndarray],
                        source_img_fname: Optional[str] = None,
                        orig_indices: Optional[List[int]] = None,
                        author: Optional[str] = "anonymous",
-                       web_app_url: str = WEB_APP_URL) -> Dict[str, Any]:
+                       web_app_url: str = WEB_APP_URL,
+                       save_locally: bool = False,
+                       local_output_dir: str = "labeled_tiles") -> Dict[str, Any]:
     """
     Upload tiles and masks to the web app in a single batch request.
     
@@ -113,7 +155,10 @@ def upload_tiles_batch(base_name: str,
         masks: List of mask arrays (same length as tiles_rgb)
         source_img_fname: Optional source image filename for reference
         orig_indices: Optional list of original tile indices for naming
+        author: Username uploading the tiles
         web_app_url: URL of the Google Apps Script web app
+        save_locally: Whether to save tiles locally in addition to uploading
+        local_output_dir: Directory to save local tiles (default: "labeled_tiles")
     
     Returns:
         Response dictionary from the server
@@ -124,48 +169,68 @@ def upload_tiles_batch(base_name: str,
         requests.RequestException: If the request fails
     """
     assert len(tiles_rgb) == len(masks), "tiles_rgb and masks must have same length"
+    
+    # Save locally if requested
+    if save_locally:
+        save_tiles_locally(base_name, tiles_rgb, masks, orig_indices, local_output_dir)
+    
     batch_size = len(tiles_rgb)
+    chunk_size = 5
+    upload_results = []
+    
+    # Upload tiles in chunks of 5 or less
+    for chunk_start in range(0, batch_size, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, batch_size)
+        
+        # Build items for this chunk
+        items = []
+        for i in range(chunk_start, chunk_end):
+            i_orig = orig_indices[i] if orig_indices is not None else i
+            items.append({
+                "i": i_orig,
+                "png_b64": encode_png_b64(tiles_rgb[i]),
+                "csv_b64": encode_csv_b64(masks[i]),
+                "png_name": f"{base_name}_tile_{i_orig:04d}.png",
+                "csv_name": f"{base_name}_tile_{i_orig:04d}.csv",
+            })
 
-    items = []
-    for i in range(batch_size):
-        i_orig = orig_indices[i] if orig_indices is not None else i
-        items.append({
-            "i": i_orig,
-            "png_b64": encode_png_b64(tiles_rgb[i]),
-            "csv_b64": encode_csv_b64(masks[i]),
-            "png_name": f"{base_name}_tile_{i_orig:04d}.png",
-            "csv_name": f"{base_name}_tile_{i_orig:04d}.csv",
-        })
+        payload = {
+            "action": "upload_tiles",
+            "author": author,
+            "baseName": base_name,
+            "source_img_fname": source_img_fname,
+            "items": items,
+        }
+        
+        r = requests.post(web_app_url, json=payload, timeout=3000)
+        r.raise_for_status()
+        
+        try:
+            res = r.json()
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP error occurred: {e}")
+            print(f"Response text: {e.response.text}")
+            raise
+        except requests.exceptions.JSONDecodeError as e:
+            print(f"JSONDecodeError: {e}")
+            print(f"Response text that caused the error: {r.text if 'r' in locals() else 'No response available'}")
+            raise
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            raise
 
-    payload = {
-        "action": "upload_tiles",
-        "author": author,
-        "baseName": base_name,
-        "source_img_fname": source_img_fname,
-        "items": items,
+        if not res.get("ok"):
+            raise RuntimeError(f"Upload failed for chunk {chunk_start}-{chunk_end}: {res}")
+        
+        upload_results.append(res)
+    
+    # Return combined result
+    return {
+        "ok": True,
+        "chunks_uploaded": len(upload_results),
+        "total_tiles": batch_size,
+        "results": upload_results
     }
-    
-    r = requests.post(web_app_url, json=payload, timeout=300)
-    r.raise_for_status()
-    
-    try:
-        res = r.json()
-    except requests.exceptions.HTTPError as e:
-        print(f"HTTP error occurred: {e}")
-        print(f"Response text: {e.response.text}")
-        raise
-    except requests.exceptions.JSONDecodeError as e:
-        print(f"JSONDecodeError: {e}")
-        print(f"Response text that caused the error: {r.text if 'r' in locals() else 'No response available'}")
-        raise
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        raise
-
-    if not res.get("ok"):
-        raise RuntimeError(f"Upload failed: {res}")
-    
-    return res
 
 
 def skip_image(web_app_url: str = WEB_APP_URL, file_id: Optional[str] = None) -> None:
