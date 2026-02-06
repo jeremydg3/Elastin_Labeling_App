@@ -431,6 +431,130 @@ def get_cache_stats() -> Dict[str, Any]:
         return {"error": str(e)}
 
 
+def _get_progress_mask_path(file_id: str) -> Path:
+    """Get the path to the progress mask CSV file for a given file ID."""
+    return CACHE_DIR / f"{file_id}_mask.csv"
+
+
+def save_progress_mask(file_id: str, full_mask: np.ndarray) -> bool:
+    """
+    Save the full image mask as a CSV file in the cache folder.
+    
+    Args:
+        file_id: The file ID of the image
+        full_mask: Full image mask array (H, W) with values 0..9 or 255
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        mask_path = _get_progress_mask_path(file_id)
+        
+        # Save as CSV
+        with open(mask_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            for row in full_mask:
+                writer.writerow(row)
+        
+        print(f"Saved progress mask to {mask_path}")
+        return True
+    except Exception as e:
+        print(f"Failed to save progress mask: {e}")
+        return False
+
+
+def load_progress_mask(file_id: str) -> Optional[np.ndarray]:
+    """
+    Load the full image mask from a CSV file in the cache folder.
+    
+    Args:
+        file_id: The file ID of the image
+    
+    Returns:
+        Full image mask array (H, W) or None if not found
+    """
+    try:
+        mask_path = _get_progress_mask_path(file_id)
+        
+        if not mask_path.exists():
+            return None
+        
+        # Load from CSV
+        with open(mask_path, 'r') as f:
+            reader = csv.reader(f)
+            rows = []
+            for row in reader:
+                rows.append([int(val) for val in row])
+        
+        mask = np.array(rows, dtype=np.uint8)
+        print(f"Loaded progress mask from {mask_path}, shape: {mask.shape}")
+        return mask
+    except Exception as e:
+        print(f"Failed to load progress mask: {e}")
+        return None
+
+
+def delete_progress_mask(file_id: str) -> bool:
+    """
+    Delete the progress mask for a given file ID.
+    
+    Args:
+        file_id: The file ID of the image
+    
+    Returns:
+        True if deleted, False otherwise
+    """
+    try:
+        mask_path = _get_progress_mask_path(file_id)
+        if mask_path.exists():
+            mask_path.unlink()
+            print(f"Deleted progress mask: {mask_path}")
+            return True
+        return False
+    except Exception as e:
+        print(f"Failed to delete progress mask: {e}")
+        return False
+
+
+def mark_image_in_progress(web_app_url: str, file_id: str, user: str) -> dict:
+    """
+    Mark an image as in_progress on the backend.
+    
+    Args:
+        web_app_url: URL of the Google Apps Script web app
+        file_id: The file ID to mark as in_progress
+        user: The username
+    
+    Returns:
+        Response dictionary
+    """
+    try:
+        r = requests.post(web_app_url, json={"action": "mark_in_progress", "fileId": file_id, "user": user}, timeout=30)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def get_in_progress_image(web_app_url: str, user: str) -> dict:
+    """
+    Get the in_progress image for a user from the backend.
+    
+    Args:
+        web_app_url: URL of the Google Apps Script web app
+        user: The username
+    
+    Returns:
+        Response dictionary with fileId and fileName if found
+    """
+    try:
+        r = requests.post(web_app_url, json={"action": "get_in_progress", "user": user}, timeout=30)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def prefetch_next_image(web_app_url: str = WEB_APP_URL) -> None:
     """
     Prefetch the next image in the background to warm the cache.

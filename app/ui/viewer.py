@@ -1,7 +1,11 @@
 import sys, os
+import io
+import base64
+import requests
 import numpy as np
 import cv2
 import math
+import tifffile
 from typing import List, Any, Callable, Optional
 
 from PyQt6.QtGui import QCloseEvent, QIcon
@@ -21,7 +25,12 @@ from webapp_interface_funcs import (
     clean_exit,
     prefetch_next_image,
     clean_cache,
-    get_cache_stats
+    get_cache_stats,
+    save_progress_mask,
+    load_progress_mask,
+    delete_progress_mask,
+    mark_image_in_progress,
+    get_in_progress_image
 )
 from styles import apply_dark_theme
 
@@ -79,6 +88,9 @@ class MainWindow(QWidget):
         self.btnSkip.setProperty("warning", True)  # Use warning button style
         self.btnSkip.setToolTip("Skip the current image")
         self.btnSkip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btnSaveProgress = QPushButton("💾 Save and Quit")
+        self.btnSaveProgress.setToolTip("Save your work in progress and quit")
+        self.btnSaveProgress.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btnCleanCache = QPushButton("🗑️ Clean Cache")
         self.btnCleanCache.setToolTip("Remove completed images from cache")
         self.btnCleanCache.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -92,6 +104,7 @@ class MainWindow(QWidget):
         ctl.addWidget(self.btnNext)
         ctl.addWidget(self.btnDone)
         ctl.addWidget(self.btnSkip)
+        ctl.addWidget(self.btnSaveProgress)
         ctl.addWidget(self.btnCleanCache)
         ctl.addStretch(1)
 
@@ -113,7 +126,9 @@ class MainWindow(QWidget):
         self.btnNext.clicked.connect(self.on_next)
         self.btnDone.clicked.connect(self.on_done)
         self.btnSkip.clicked.connect(self.on_skip)
+        self.btnSaveProgress.clicked.connect(self.on_save_progress)
         self.btnCleanCache.clicked.connect(self.on_clean_cache)
+        self.view.tileCompleted.connect(self._on_tile_completed)
         self._set_work_buttons_enabled(False)
     
 
@@ -141,6 +156,10 @@ class MainWindow(QWidget):
             if selected_user:
                 self.user = selected_user
                 self.setWindowTitle(f"Elastin Queue Tile Viewer - User: {self.user}")
+                
+                # Check for in-progress work
+                self._check_and_resume_progress()
+                
                 return True
             else:
                 # User cancelled - close the app
@@ -153,6 +172,119 @@ class MainWindow(QWidget):
                 f"Failed to load user list: {str(e)}\n\nPlease check your connection and try again."
             )
             return False
+
+
+    def _check_and_resume_progress(self):
+        """Check if user has in-progress work and offer to resume."""
+        try:
+            # Query backend for in_progress work
+            result = get_in_progress_image(self.web_app_url, self.user)
+            
+            if not result.get("ok"):
+                # No in-progress work found
+                return
+            
+            file_id = result["fileId"]
+            file_name = result["fileName"]
+            
+            # Check if we have the cached image and mask
+            mask = load_progress_mask(file_id)
+            if mask is None:
+                print(f"In-progress work found but no cached mask for {file_id}")
+                return
+            
+            # Ask user if they want to resume
+            reply = QMessageBox.question(
+                self,
+                "Resume Progress",
+                f"You have in-progress work on:\n{file_name}\n\nWould you like to resume?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self._resume_progress(file_id, file_name, mask)
+            
+        except Exception as e:
+            print(f"Error checking for in-progress work: {e}")
+
+
+    def _resume_progress(self, file_id: str, file_name: str, full_mask: np.ndarray):
+        """Resume work on an in-progress image."""
+        try:
+            self._busy(True, "Resuming progress...")
+            
+            def _task_resume():
+                # Fetch the image from cache or backend
+                from webapp_interface_funcs import _load_from_cache
+                
+                # Try cache first
+                cached_bytes = _load_from_cache(file_id)
+                if cached_bytes:
+                    img_array = tifffile.imread(io.BytesIO(cached_bytes))
+                else:
+                    # Fetch from backend (this won't claim it again since it's in_progress)
+                    raw_url = f"{self.web_app_url}?raw={file_id}"
+                    rb = requests.get(raw_url, timeout=180)
+                    rb.raise_for_status()
+                    b = base64.b64decode(rb.text.strip())
+                    img_array = tifffile.imread(io.BytesIO(b))
+                
+                # Process image
+                img_rgb = self._to_rgb_uint8(img_array)
+                tiles_np, enabled_flags, (rows, cols) = self._split_into_tiles_with_padding(
+                    img_rgb, tile=self.tile_size, pad_value=0
+                )
+                
+                # Split mask into tiles
+                tile_masks = self._split_full_mask_to_tiles(full_mask, (rows, cols))
+                
+                return {
+                    "fileId": file_id,
+                    "fileName": file_name,
+                    "img_shape": img_rgb.shape,
+                    "tiles": tiles_np,
+                    "enabled": enabled_flags,
+                    "layout": (rows, cols),
+                    "tile_masks": tile_masks
+                }
+            
+            def _on_resume_result(res: dict):
+                # Set up current state
+                self.current = {
+                    "fileId": res["fileId"],
+                    "fileName": res["fileName"],
+                    "img_h": res["img_shape"][0],
+                    "img_w": res["img_shape"][1],
+                    "layout": res["layout"]
+                }
+                self.image_title = res["fileName"]
+                self.view.set_title(self.image_title)
+                self.tiles_np = res["tiles"]
+                
+                # Set tiles
+                rows, cols = res["layout"]
+                img_h, img_w = res["img_shape"][0], res["img_shape"][1]
+                self.view.set_tiles_with_flags(self.tiles_np, res["enabled"], (rows, cols))
+                
+                # Restore masks
+                self.view._masks = res["tile_masks"]
+                
+                self.status.setText(f"{self.image_title}  —  image: {img_w}x{img_h}  tiles: {rows}x{cols} (RESUMED)")
+                self._set_work_buttons_enabled(True)
+                
+                # Start prefetching next image
+                self._start_prefetch()
+            
+            self._run_in_thread(_task_resume, on_result=_on_resume_result, on_error=self._show_error)
+            
+        except Exception as e:
+            self._show_error(f"Failed to resume progress: {e}")
+
+
+    def _on_tile_completed(self, tile_idx: int):
+        """Called when a tile is marked complete - auto-save progress."""
+        print(f"Tile {tile_idx} marked complete, auto-saving progress...")
+        self._auto_save_progress()
 
 
     # ------------------ Actions ------------------
@@ -197,6 +329,9 @@ class MainWindow(QWidget):
                 self._set_work_buttons_enabled(False)
                 return
             self.current = res["data"]
+            self.current["img_h"] = res["img_shape"][0]
+            self.current["img_w"] = res["img_shape"][1]
+            self.current["layout"] = res["layout"]
             self.image_title = res["fname"]
             self.view.set_title(self.image_title)
             self.tiles_np = res["tiles"]
@@ -245,6 +380,34 @@ class MainWindow(QWidget):
 
         # Run upload in background thread
         self._run_in_thread(_task_upload, on_result=_on_uploaded, on_error=self._show_error)
+
+
+    def on_save_progress(self):
+        """Save progress and quit the application."""
+        if not self.current:
+            return
+        
+        # Check if there's any work to save
+        if not self.view._masks:
+            QMessageBox.information(
+                self,
+                "Nothing to Save",
+                "No tiles have been annotated yet. Mark some tiles as complete before saving."
+            )
+            return
+        
+        # Save progress
+        self._auto_save_progress()
+        
+        # Show brief confirmation and quit
+        QMessageBox.information(
+            self,
+            "Progress Saved",
+            f"Your work on {self.image_title} has been saved.\n\nClosing application..."
+        )
+        
+        # Quit the application
+        QApplication.quit()
 
 
     def on_skip(self):
@@ -305,6 +468,8 @@ class MainWindow(QWidget):
             return
         file_id = self.current["fileId"]
         mark_image_done(self.web_app_url, file_id)
+        # Delete progress mask since work is complete
+        delete_progress_mask(file_id)
         self.current = None
         self._set_work_buttons_enabled(False)
 
@@ -410,13 +575,14 @@ class MainWindow(QWidget):
 
 
     def _set_work_buttons_enabled(self, enabled: bool):
-        """Enable or disable the Done and Skip buttons.
+        """Enable or disable the Done, Skip, and Save Progress buttons.
 
         Args:
             enabled: True to enable the buttons, False to disable them.
         """
         self.btnDone.setEnabled(enabled)
         self.btnSkip.setEnabled(enabled)
+        self.btnSaveProgress.setEnabled(enabled)
 
 
     def _start_prefetch(self):
@@ -548,6 +714,116 @@ class MainWindow(QWidget):
                 enabled.append(is_full)
 
         return tiles, enabled, (rows, cols)
+
+
+    def _stitch_masks_to_full_image(self, tile_masks: dict[int, np.ndarray], img_shape: tuple, layout: tuple) -> np.ndarray:
+        """
+        Stitch individual tile masks back into a full image mask.
+        
+        Args:
+            tile_masks: Dictionary mapping tile index to mask array (tile_size x tile_size)
+            img_shape: Original image shape (H, W, C)
+            layout: Tile layout (rows, cols)
+        
+        Returns:
+            Full image mask (H, W) filled with 255 (empty) and mask data where tiles exist
+        """
+        rows, cols = layout
+        img_h, img_w = img_shape[0], img_shape[1]
+        
+        # Create full mask initialized to 255 (empty)
+        full_mask = np.full((img_h, img_w), 255, dtype=np.uint8)
+        
+        # Place each tile mask into the full mask
+        for tile_idx, mask in tile_masks.items():
+            r = tile_idx // cols
+            c = tile_idx % cols
+            
+            y0 = r * self.tile_size
+            x0 = c * self.tile_size
+            y1 = min(y0 + self.tile_size, img_h)
+            x1 = min(x0 + self.tile_size, img_w)
+            
+            # Extract only the valid portion (no padding)
+            h_valid = y1 - y0
+            w_valid = x1 - x0
+            
+            full_mask[y0:y1, x0:x1] = mask[:h_valid, :w_valid]
+        
+        return full_mask
+
+
+    def _split_full_mask_to_tiles(self, full_mask: np.ndarray, layout: tuple) -> dict[int, np.ndarray]:
+        """
+        Split a full image mask into individual tile masks.
+        
+        Args:
+            full_mask: Full image mask (H, W)
+            layout: Tile layout (rows, cols)
+        
+        Returns:
+            Dictionary mapping tile index to mask array (tile_size x tile_size)
+        """
+        rows, cols = layout
+        img_h, img_w = full_mask.shape
+        tile_masks = {}
+        
+        for r in range(rows):
+            for c in range(cols):
+                tile_idx = r * cols + c
+                
+                y0 = r * self.tile_size
+                x0 = c * self.tile_size
+                y1 = min(y0 + self.tile_size, img_h)
+                x1 = min(x0 + self.tile_size, img_w)
+                
+                # Extract tile region
+                tile_mask = full_mask[y0:y1, x0:x1]
+                
+                # Pad if necessary
+                h, w = tile_mask.shape
+                if h < self.tile_size or w < self.tile_size:
+                    pad_h = self.tile_size - h
+                    pad_w = self.tile_size - w
+                    tile_mask = np.pad(
+                        tile_mask,
+                        ((0, pad_h), (0, pad_w)),
+                        mode="constant",
+                        constant_values=255
+                    )
+                
+                # Only store if there's actual mask data (not all 255)
+                if not np.all(tile_mask == 255):
+                    tile_masks[tile_idx] = tile_mask.astype(np.uint8)
+        
+        return tile_masks
+
+
+    def _auto_save_progress(self):
+        """Automatically save progress after user makes changes."""
+        if not self.current:
+            return
+        
+        file_id = self.current["fileId"]
+        
+        # Get all tile masks from the view
+        tile_masks = self.view._masks  # Access internal masks dict
+        
+        if not tile_masks:
+            # No work done yet, don't save
+            return
+        
+        # Stitch masks into full image mask
+        img_shape = (self.current.get("img_h", 0), self.current.get("img_w", 0), 3)
+        layout = self.current.get("layout", (0, 0))
+        
+        full_mask = self._stitch_masks_to_full_image(tile_masks, img_shape, layout)
+        
+        # Save to cache
+        if save_progress_mask(file_id, full_mask):
+            # Mark as in_progress on backend
+            mark_image_in_progress(self.web_app_url, file_id, self.user)
+            print(f"Auto-saved progress for {file_id}")
 
 
 

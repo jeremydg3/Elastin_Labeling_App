@@ -203,14 +203,58 @@ function markDone_(fileId, requester) {
     const sh = sheet_();
     const data = sh.getDataRange().getValues();
     for (let r = 1; r < data.length; r++) {
-      if (data[r][0] === fileId && data[r][2] === 'claimed') {
+      if (data[r][0] === fileId && (data[r][2] === 'claimed' || data[r][2] === 'in_progress')) {
         // optional: ensure same user
         sh.getRange(r + 1, 3).setValue('done');
         sh.getRange(r + 1, 6).setValue(now_()); // doneAt
         return { ok: true };
       }
     }
+    return { ok: false, message: 'Not found or not claimed/in_progress.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function markInProgress_(fileId, requester) {
+  // Mark image as in_progress so it's preserved across clearStaleClaims
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_();
+    const data = sh.getDataRange().getValues();
+    for (let r = 1; r < data.length; r++) {
+      if (data[r][0] === fileId && data[r][2] === 'claimed') {
+        sh.getRange(r + 1, 3).setValue('in_progress');
+        return { ok: true };
+      }
+    }
     return { ok: false, message: 'Not found or not claimed.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getInProgress_(requester) {
+  // Get the in_progress image for a specific user
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_();
+    const data = sh.getDataRange().getValues();
+    
+    for (let r = 1; r < data.length; r++) {
+      const status = data[r][2];
+      const claimedBy = data[r][3];
+      
+      if (status === 'in_progress' && claimedBy === requester) {
+        const fileId = data[r][0];
+        const fileName = data[r][1];
+        return { ok: true, fileId, fileName };
+      }
+    }
+    
+    return { ok: false, message: 'No in_progress work found.' };
   } finally {
     lock.releaseLock();
   }
@@ -339,10 +383,11 @@ function clearStaleClaims() {
       const status = data[r][2]; // Column C (status)
       const doneAt = data[r][5]; // Column F (doneAt)
       
-      // Clear stale claimed images and skipped images
+      // Clear stale claimed images and skipped images (but preserve in_progress)
       if ((status === 'claimed' && !doneAt) || status === 'skipped') {
         sh.getRange(r + 1, 3, 1, 4).clearContent(); // Clear columns C-F
       }
+      // Note: in_progress status is intentionally NOT cleared
     }
     
     return { ok: true };
@@ -422,6 +467,8 @@ function doPost(e) {
   if (req.action === 'peek_next') return json_(peekNext_());
   if (req.action === 'next') return json_(popNext_(req.user || me));
   if (req.action === 'done' && req.fileId) return json_(markDone_(req.fileId, me));
+  if (req.action === 'mark_in_progress' && req.fileId) return json_(markInProgress_(req.fileId, req.user || me));
+  if (req.action === 'get_in_progress') return json_(getInProgress_(req.user || me));
   if (req.action === 'skip' && req.fileId) return json_(skip_(req.fileId, me));
   if (req.action === 'random_tile') return json_(popRandomTile_());
   if (req.action === 'user_list') return json_({ users: getUserList() });
