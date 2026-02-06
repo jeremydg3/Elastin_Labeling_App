@@ -99,15 +99,20 @@ function shuffleUnclaimed() {
 
 /***** === CORE QUEUE OPS (atomic) === *****/
 function findNextRow_(data, staleMinutes) {
-  // prefer: first unclaimed; else reclaim stale claimed
+  // prefer: first unclaimed (not skipped); else reclaim stale claimed
   for (let r = 1; r < data.length; r++) {
-    if (!data[r][2]) return r; // status empty
+    const status = data[r][2];
+    if (!status || status === '') return r; // status empty = unclaimed
   }
   for (let r = 1; r < data.length; r++) {
     const status = data[r][2], claimedAt = data[r][4];
     if (status === 'claimed' && claimedAt && minutesAgo_(claimedAt) >= staleMinutes) {
       return r;
     }
+  }
+  // If no unclaimed, check skipped items
+  for (let r = 1; r < data.length; r++) {
+    if (data[r][2] === 'skipped') return r;
   }
   return -1;
 }
@@ -119,6 +124,7 @@ function popNext_(requester) {
     const sh = sheet_();
     const rng = sh.getDataRange();
     const data = rng.getValues();
+    
     const rowIdx = findNextRow_(data, CFG.STALE_MINUTES);
     if (rowIdx < 0) return { done: true, message: 'Queue empty.' };
 
@@ -130,6 +136,13 @@ function popNext_(requester) {
     sh.getRange(sheetRow, 3).setValue('claimed');        // status
     sh.getRange(sheetRow, 4).setValue(requester);        // claimedBy
     sh.getRange(sheetRow, 5).setValue(now_());           // claimedAt
+
+    // Now clear any skipped status AFTER claiming the new image
+    for (let r = 1; r < data.length; r++) {
+      if (data[r][2] === 'skipped') {
+        sh.getRange(r + 1, 3, 1, 4).clearContent(); // Clear status, claimedBy, claimedAt, doneAt
+      }
+    }
 
     const viewLink = 'https://drive.google.com/file/d/' + fileId + '/view';
     const directLink = 'https://drive.google.com/uc?export=download&id=' + fileId;
@@ -191,7 +204,7 @@ function markDone_(fileId, requester) {
 }
 
 function skip_(fileId, requester) {
-  // turn a claimed row back to unclaimed
+  // Mark as skipped so it won't be picked again immediately
   const lock = LockService.getScriptLock();
   lock.tryLock(30000);
   try {
@@ -199,7 +212,8 @@ function skip_(fileId, requester) {
     const data = sh.getDataRange().getValues();
     for (let r = 1; r < data.length; r++) {
       if (data[r][0] === fileId && data[r][2] === 'claimed') {
-        sh.getRange(r + 1, 3, 1, 4).clearContent(); // status..doneAt
+        sh.getRange(r + 1, 3).setValue('skipped');  // Mark as skipped
+        sh.getRange(r + 1, 4, 1, 3).clearContent(); // Clear claimedBy, claimedAt, doneAt
         return { ok: true };
       }
     }

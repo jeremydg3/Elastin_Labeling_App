@@ -12,10 +12,14 @@ import cv2
 import tifffile
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+import hashlib
+import time
 
 
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw8mQLmfC5dYQ2Hc41M3d-nTKsxx_oRsgIl_c6iFdpkeoerrrI1OaoIJdbCSkoHPNHDSg/exec"
 MAX_ATTEMPTS = 3
+CACHE_DIR = Path("cache")
+CACHE_DIR.mkdir(exist_ok=True)
 
 def encode_png_b64(tile_rgb: np.ndarray) -> str:
     """
@@ -53,13 +57,42 @@ def encode_csv_b64(mask: np.ndarray) -> str:
     return base64.b64encode(text).decode("ascii")
 
 
-def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anonymous") -> Dict[str, Any]:
+def _get_cache_path(file_id: str) -> Path:
+    """Get cache file path for a given file ID."""
+    # Use hash to create safe filename
+    safe_id = hashlib.md5(file_id.encode()).hexdigest()
+    return CACHE_DIR / f"{safe_id}.tif"
+
+
+def _save_to_cache(file_id: str, data: bytes) -> None:
+    """Save image data to cache."""
+    try:
+        cache_path = _get_cache_path(file_id)
+        cache_path.write_bytes(data)
+    except Exception as e:
+        # Don't fail if caching fails
+        print(f"Cache write failed: {e}")
+
+
+def _load_from_cache(file_id: str) -> Optional[bytes]:
+    """Load image data from cache if available."""
+    try:
+        cache_path = _get_cache_path(file_id)
+        if cache_path.exists():
+            return cache_path.read_bytes()
+    except Exception as e:
+        print(f"Cache read failed: {e}")
+    return None
+
+
+def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anonymous", use_cache: bool = True) -> Dict[str, Any]:
     """
     Fetch the next image from the queue.
     
     Args:
         web_app_url: URL of the Google Apps Script web app
         user: Username requesting the image
+        use_cache: Whether to use local disk cache (default: True)
     
     Returns:
         Dictionary with either:
@@ -79,14 +112,29 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
         if data.get("done"):
             return {"done": True, "message": data.get("message", "Queue empty.")}
         
-        # Fetch the raw image bytes
+        file_id = data['fileId']
         fname = data.get("fileName", "(unnamed)")
-        raw_url = f"{web_app_url}?raw={data['fileId']}"
-        rb = requests.get(raw_url, timeout=120)
-        rb.raise_for_status()
         
-        # Decode base64 (Apps Script always returns base64 over HTTP)
-        b = base64.b64decode(rb.content)
+        # Try cache first
+        b = None
+        if use_cache:
+            b = _load_from_cache(file_id)
+            if b:
+                print(f"Cache hit for {fname}")
+        
+        # Download if not cached
+        if b is None:
+            raw_url = f"{web_app_url}?raw={file_id}"
+            rb = requests.get(raw_url, timeout=120)
+            rb.raise_for_status()
+            
+            # Decode base64 (Apps Script returns base64 text)
+            b = base64.b64decode(rb.text)
+            
+            # Save to cache for next time
+            if use_cache:
+                _save_to_cache(file_id, b)
+        
         arr = tifffile.imread(io.BytesIO(b))
         
         return {
@@ -305,3 +353,48 @@ def create_new_user(web_app_url: str = WEB_APP_URL, name: Optional[str] = None) 
     r.raise_for_status()
     data = r.json()
     return data.get("ok", False)
+
+
+def prefetch_next_image(web_app_url: str = WEB_APP_URL) -> None:
+    """
+    Prefetch the next image in the background to warm the cache.
+    This peeks at the next image without claiming it.
+    Downloads the file to cache so it's ready when user requests it.
+    
+    Note: This is a "peek" operation - it doesn't claim the image.
+    Call this in a background thread while user works on current image.
+    
+    Args:
+        web_app_url: URL of the Google Apps Script web app
+    """
+    try:
+        # Peek at next image (get file ID without claiming)
+        r = requests.post(web_app_url, json={"action": "peek_next"}, timeout=30)
+        
+        # If peek action doesn't exist in backend, silently skip prefetch
+        if r.status_code != 200:
+            return
+            
+        data = r.json()
+        if data.get("done") or not data.get("fileId"):
+            return
+        
+        file_id = data['fileId']
+        
+        # Check if already cached
+        if _load_from_cache(file_id) is not None:
+            return  # Already cached
+        
+        # Download and cache
+        raw_url = f"{web_app_url}?raw={file_id}"
+        rb = requests.get(raw_url, timeout=180)
+        rb.raise_for_status()
+        
+        # Decode and cache
+        b = base64.b64decode(rb.content)
+        _save_to_cache(file_id, b)
+        print(f"Prefetched image {file_id} to cache")
+        
+    except Exception as e:
+        # Silently fail - prefetch is optional optimization
+        print(f"Prefetch failed (non-critical): {e}")

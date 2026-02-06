@@ -18,7 +18,8 @@ from webapp_interface_funcs import (
     skip_image,
     get_user_list,
     mark_image_done,
-    clean_exit
+    clean_exit,
+    prefetch_next_image
 )
 from styles import apply_dark_theme
 
@@ -99,6 +100,8 @@ class MainWindow(QWidget):
         self._bg_threads = []  # type: list[QThread]
         self._bg_workers = []  # type: list[Worker]
         self.user = None  # type: Optional[str]  # Selected username
+        self._prefetch_thread = None  # type: Optional[QThread]
+        self._prefetch_worker = None  # type: Optional[Worker]
 
         # --- wiring ---
         self.btnNext.clicked.connect(self.on_next)
@@ -196,6 +199,9 @@ class MainWindow(QWidget):
             self.view.set_tiles_with_flags(self.tiles_np, enabled_flags, (rows, cols))
             self.status.setText(f"{self.image_title}  —  image: {img_w}x{img_h}  tiles: {rows}x{cols}")
             self._set_work_buttons_enabled(True)
+            
+            # TODO: Start prefetching next image in background (requires backend "peek_next" action)
+            # self._start_prefetch()
 
         self._run_in_thread(_task_fetch, on_result=_on_result, on_error=self._show_error)
 
@@ -364,6 +370,45 @@ class MainWindow(QWidget):
         """
         self.btnDone.setEnabled(enabled)
         self.btnSkip.setEnabled(enabled)
+
+
+    def _start_prefetch(self):
+        """Start prefetching the next image in the background."""
+        # Cancel any existing prefetch
+        if self._prefetch_thread and self._prefetch_thread.isRunning():
+            return  # Already prefetching
+        
+        def _prefetch_task():
+            prefetch_next_image(self.web_app_url)
+            return None
+        
+        def _on_prefetch_done(_res):
+            # Cleanup
+            self._prefetch_thread = None
+            self._prefetch_worker = None
+        
+        def _on_prefetch_error(_msg):
+            # Silently fail - prefetch is optional
+            self._prefetch_thread = None
+            self._prefetch_worker = None
+        
+        # Don't use _run_in_thread because we don't want busy indicator
+        thread = QThread(self)
+        worker = Worker(_prefetch_task)
+        worker.moveToThread(thread)
+        
+        self._prefetch_thread = thread
+        self._prefetch_worker = worker
+        
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda res: _on_prefetch_done(res))
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.error.connect(lambda msg: _on_prefetch_error(msg))
+        worker.error.connect(thread.quit)
+        worker.error.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
 
 
     @staticmethod
