@@ -12,3 +12,6 @@ __pycache__/
 *.spec
 *.png
 *.csv
+*.tif
+*.tiff
+*.log
