@@ -16,7 +16,7 @@ import hashlib
 import time
 
 
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw8mQLmfC5dYQ2Hc41M3d-nTKsxx_oRsgIl_c6iFdpkeoerrrI1OaoIJdbCSkoHPNHDSg/exec"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyk9LTgILaUTa-HlSMnz9Ads9neY-lf8Y-giVduiIL7k5Q5mWYKmHtsZreUgPU9TT3aUw/exec"
 MAX_ATTEMPTS = 3
 CACHE_DIR = Path("cache")
 CACHE_DIR.mkdir(exist_ok=True)
@@ -85,14 +85,14 @@ def _load_from_cache(file_id: str) -> Optional[bytes]:
     return None
 
 
-def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anonymous", use_cache: bool = True) -> Dict[str, Any]:
+def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anonymous", use_cache: bool = False) -> Dict[str, Any]:
     """
     Fetch the next image from the queue.
     
     Args:
         web_app_url: URL of the Google Apps Script web app
         user: Username requesting the image
-        use_cache: Whether to use local disk cache (default: True)
+        use_cache: Whether to use local disk cache (default: False - disabled for debugging)
     
     Returns:
         Dictionary with either:
@@ -103,7 +103,7 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
         requests.RequestException: If the request fails
         RuntimeError: If image processing fails
     """
-    for _ in range(MAX_ATTEMPTS):
+    for attempt in range(MAX_ATTEMPTS):
         # Claim next image from queue
         r = requests.post(web_app_url, json={"action": "next", "user": user}, timeout=60)
         r.raise_for_status()
@@ -125,17 +125,39 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
         # Download if not cached
         if b is None:
             raw_url = f"{web_app_url}?raw={file_id}"
+            print(f"Downloading from: {raw_url}")
             rb = requests.get(raw_url, timeout=120)
             rb.raise_for_status()
             
-            # Decode base64 (Apps Script returns base64 text)
-            b = base64.b64decode(rb.text)
+            print(f"Response status: {rb.status_code}")
+            print(f"Response headers: {rb.headers.get('content-type')}")
+            print(f"Response length: {len(rb.text)}")
+            print(f"First 50 chars: {rb.text[:50]}")
+            
+            try:
+                # Decode base64 (Apps Script returns base64 text)
+                # Strip whitespace that might cause padding issues
+                b64_text = rb.text.strip()
+                b = base64.b64decode(b64_text)
+                print(f"Decoded {len(b)} bytes")
+                print(f"First 20 bytes: {b[:20]}")
+            except Exception as e:
+                print(f"Base64 decode error: {e}")
+                raise
             
             # Save to cache for next time
             if use_cache:
                 _save_to_cache(file_id, b)
         
-        arr = tifffile.imread(io.BytesIO(b))
+        try:
+            arr = tifffile.imread(io.BytesIO(b))
+            print(f"Successfully loaded TIFF: shape={arr.shape}, dtype={arr.dtype}")
+        except Exception as e:
+            print(f"TIFF read error: {e}")
+            print(f"Attempt {attempt + 1}/{MAX_ATTEMPTS}")
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            continue
         
         return {
             "done": False,

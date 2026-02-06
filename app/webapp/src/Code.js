@@ -99,21 +99,20 @@ function shuffleUnclaimed() {
 
 /***** === CORE QUEUE OPS (atomic) === *****/
 function findNextRow_(data, staleMinutes) {
-  // prefer: first unclaimed (not skipped); else reclaim stale claimed
+  // prefer: first unclaimed (skip over 'skipped' status); else reclaim stale claimed
   for (let r = 1; r < data.length; r++) {
     const status = data[r][2];
     if (!status || status === '') return r; // status empty = unclaimed
   }
+  
+  // Try stale claimed items
   for (let r = 1; r < data.length; r++) {
     const status = data[r][2], claimedAt = data[r][4];
     if (status === 'claimed' && claimedAt && minutesAgo_(claimedAt) >= staleMinutes) {
       return r;
     }
   }
-  // If no unclaimed, check skipped items
-  for (let r = 1; r < data.length; r++) {
-    if (data[r][2] === 'skipped') return r;
-  }
+  
   return -1;
 }
 
@@ -136,13 +135,6 @@ function popNext_(requester) {
     sh.getRange(sheetRow, 3).setValue('claimed');        // status
     sh.getRange(sheetRow, 4).setValue(requester);        // claimedBy
     sh.getRange(sheetRow, 5).setValue(now_());           // claimedAt
-
-    // Now clear any skipped status AFTER claiming the new image
-    for (let r = 1; r < data.length; r++) {
-      if (data[r][2] === 'skipped') {
-        sh.getRange(r + 1, 3, 1, 4).clearContent(); // Clear status, claimedBy, claimedAt, doneAt
-      }
-    }
 
     const viewLink = 'https://drive.google.com/file/d/' + fileId + '/view';
     const directLink = 'https://drive.google.com/uc?export=download&id=' + fileId;
@@ -212,8 +204,8 @@ function skip_(fileId, requester) {
     const data = sh.getDataRange().getValues();
     for (let r = 1; r < data.length; r++) {
       if (data[r][0] === fileId && data[r][2] === 'claimed') {
-        sh.getRange(r + 1, 3).setValue('skipped');  // Mark as skipped
-        sh.getRange(r + 1, 4, 1, 3).clearContent(); // Clear claimedBy, claimedAt, doneAt
+        sh.getRange(r + 1, 3).setValue('skipped');  // Mark as skipped (column C)
+        sh.getRange(r + 1, 4, 1, 3).clearContent(); // Clear claimedBy, claimedAt, doneAt (columns D, E, F)
         return { ok: true };
       }
     }
@@ -326,7 +318,8 @@ function clearStaleClaims() {
       const status = data[r][2]; // Column C (status)
       const doneAt = data[r][5]; // Column F (doneAt)
       
-      if (status === 'claimed' && !doneAt) {
+      // Clear stale claimed images and skipped images
+      if ((status === 'claimed' && !doneAt) || status === 'skipped') {
         sh.getRange(r + 1, 3, 1, 4).clearContent(); // Clear columns C-F
       }
     }
@@ -392,13 +385,31 @@ function json_(obj) {
 }
 
 function doGet(e) {
+  Logger.log('doGet called with parameters: ' + JSON.stringify(e.parameter));
+  
   if (e && e.parameter && e.parameter.raw) {
-    const file = DriveApp.getFileById(e.parameter.raw);
-    const blob = file.getBlob();
-    // Return the file blob directly as binary content
-    return blob.setContentType(blob.getContentType());
+    try {
+      const fileId = e.parameter.raw;
+      Logger.log('Fetching file with ID: ' + fileId);
+      
+      const file = DriveApp.getFileById(fileId);
+      const blob = file.getBlob();
+      const b64 = Utilities.base64Encode(blob.getBytes());
+      
+      Logger.log('Returning base64 data, length: ' + b64.length);
+      
+      return ContentService
+        .createTextOutput(b64)
+        .setMimeType(ContentService.MimeType.TEXT);
+    } catch (error) {
+      Logger.log('Error in doGet: ' + error.toString());
+      return ContentService
+        .createTextOutput('Error: ' + error.toString())
+        .setMimeType(ContentService.MimeType.TEXT);
+    }
   }
 
+  Logger.log('No raw parameter, returning OK page');
   return HtmlService.createHtmlOutput("OK");
 }
 
