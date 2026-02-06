@@ -330,6 +330,34 @@ function clearStaleClaims() {
   }
 }
 
+function getCompletedFileIds() {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_();
+    const data = sh.getDataRange().getValues();
+    const completedIds = [];
+    
+    Logger.log('Scanning for completed images...');
+    
+    for (let r = 1; r < data.length; r++) {
+      const status = data[r][2]; // Column C (status)
+      if (status === 'done') {
+        completedIds.push(data[r][0]); // Column A (fileId)
+      }
+    }
+    
+    Logger.log('Found ' + completedIds.length + ' completed images');
+    
+    return { ok: true, fileIds: completedIds };
+  } catch (error) {
+    Logger.log('Error in getCompletedFileIds: ' + error.toString());
+    return { ok: false, error: error.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /***** === WEB APP ENDPOINTS === *****/
 function doPost(e) {
   const req = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
@@ -377,7 +405,8 @@ function doPost(e) {
   if (req.action === 'user_list') return json_({ users: getUserList() });
   if (req.action === 'create_user' && req.name) return json_(createNewUser(req.name));
   if (req.action === 'clean_exit' && req.fileId) return json_(clean_exit(req.fileId, me));
-  return json_({ error: 'Unknown action.' });
+  if (req.action === 'get_completed_ids') return json_(getCompletedFileIds());
+  return json_({ error: 'Unknown action: ' + req.action + '.' });
 }
 
 function json_(obj) {

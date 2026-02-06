@@ -19,7 +19,9 @@ from webapp_interface_funcs import (
     get_user_list,
     mark_image_done,
     clean_exit,
-    prefetch_next_image
+    prefetch_next_image,
+    clean_cache,
+    get_cache_stats
 )
 from styles import apply_dark_theme
 
@@ -77,6 +79,9 @@ class MainWindow(QWidget):
         self.btnSkip.setProperty("warning", True)  # Use warning button style
         self.btnSkip.setToolTip("Skip the current image")
         self.btnSkip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btnCleanCache = QPushButton("🗑️ Clean Cache")
+        self.btnCleanCache.setToolTip("Remove completed images from cache")
+        self.btnCleanCache.setCursor(Qt.CursorShape.PointingHandCursor)
         self.status = QLabel("")
         self._busy_depth = 0
         self.status.setTextFormat(Qt.TextFormat.PlainText)
@@ -87,6 +92,7 @@ class MainWindow(QWidget):
         ctl.addWidget(self.btnNext)
         ctl.addWidget(self.btnDone)
         ctl.addWidget(self.btnSkip)
+        ctl.addWidget(self.btnCleanCache)
         ctl.addStretch(1)
 
         layout = QVBoxLayout(self)
@@ -107,6 +113,7 @@ class MainWindow(QWidget):
         self.btnNext.clicked.connect(self.on_next)
         self.btnDone.clicked.connect(self.on_done)
         self.btnSkip.clicked.connect(self.on_skip)
+        self.btnCleanCache.clicked.connect(self.on_clean_cache)
         self._set_work_buttons_enabled(False)
     
 
@@ -256,6 +263,41 @@ class MainWindow(QWidget):
             self.on_next()
 
         self._run_in_thread(_task_skip, on_result=_on_skipped, on_error=self._show_error)
+
+
+    def on_clean_cache(self):
+        """Clean up cache by removing completed images."""
+        # Show current cache stats
+        stats = get_cache_stats()
+        if "error" in stats:
+            QMessageBox.warning(self, "Cache Error", f"Failed to get cache stats: {stats['error']}")
+            return
+        
+        msg = f"Current cache: {stats['file_count']} files, {stats['total_size_mb']} MB\n\nClean up completed images?"
+        reply = QMessageBox.question(self, "Clean Cache", msg, 
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        self._busy(True, "Cleaning cache...")
+        self.status.setText("Cleaning cache...")
+        
+        def _task_clean():
+            return clean_cache(self.web_app_url)
+        
+        def _on_cleaned(result):
+            if result.get("ok"):
+                msg = f"Cache cleaned!\n\nCompleted images: {result['completed_count']}\nFiles deleted: {result['deleted_count']}"
+                QMessageBox.information(self, "Cache Cleaned", msg)
+                
+                # Update stats
+                new_stats = get_cache_stats()
+                self.status.setText(f"Cache: {new_stats['file_count']} files, {new_stats['total_size_mb']} MB")
+            else:
+                QMessageBox.warning(self, "Cache Clean Failed", result.get("message", "Unknown error"))
+        
+        self._run_in_thread(_task_clean, on_result=_on_cleaned, on_error=self._show_error)
 
 
     def mark_done(self):

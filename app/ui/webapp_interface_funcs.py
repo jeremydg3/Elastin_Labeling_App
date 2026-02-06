@@ -85,14 +85,14 @@ def _load_from_cache(file_id: str) -> Optional[bytes]:
     return None
 
 
-def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anonymous", use_cache: bool = False) -> Dict[str, Any]:
+def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anonymous", use_cache: bool = True) -> Dict[str, Any]:
     """
     Fetch the next image from the queue.
     
     Args:
         web_app_url: URL of the Google Apps Script web app
         user: Username requesting the image
-        use_cache: Whether to use local disk cache (default: False - disabled for debugging)
+        use_cache: Whether to use local disk cache (default: True)
     
     Returns:
         Dictionary with either:
@@ -125,25 +125,12 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
         # Download if not cached
         if b is None:
             raw_url = f"{web_app_url}?raw={file_id}"
-            print(f"Downloading from: {raw_url}")
-            rb = requests.get(raw_url, timeout=120)
+            rb = requests.get(raw_url, timeout=500)
             rb.raise_for_status()
             
-            print(f"Response status: {rb.status_code}")
-            print(f"Response headers: {rb.headers.get('content-type')}")
-            print(f"Response length: {len(rb.text)}")
-            print(f"First 50 chars: {rb.text[:50]}")
-            
-            try:
-                # Decode base64 (Apps Script returns base64 text)
-                # Strip whitespace that might cause padding issues
-                b64_text = rb.text.strip()
-                b = base64.b64decode(b64_text)
-                print(f"Decoded {len(b)} bytes")
-                print(f"First 20 bytes: {b[:20]}")
-            except Exception as e:
-                print(f"Base64 decode error: {e}")
-                raise
+            # Decode base64 (Apps Script returns base64 text)
+            b64_text = rb.text.strip()
+            b = base64.b64decode(b64_text)
             
             # Save to cache for next time
             if use_cache:
@@ -151,10 +138,8 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
         
         try:
             arr = tifffile.imread(io.BytesIO(b))
-            print(f"Successfully loaded TIFF: shape={arr.shape}, dtype={arr.dtype}")
         except Exception as e:
-            print(f"TIFF read error: {e}")
-            print(f"Attempt {attempt + 1}/{MAX_ATTEMPTS}")
+            print(f"TIFF read error on attempt {attempt + 1}/{MAX_ATTEMPTS}: {e}")
             if attempt == MAX_ATTEMPTS - 1:
                 raise
             continue
@@ -375,6 +360,75 @@ def create_new_user(web_app_url: str = WEB_APP_URL, name: Optional[str] = None) 
     r.raise_for_status()
     data = r.json()
     return data.get("ok", False)
+
+
+def clean_cache(web_app_url: str = WEB_APP_URL) -> Dict[str, Any]:
+    """
+    Clean up the cache by removing completed images.
+    
+    Args:
+        web_app_url: URL of the Google Apps Script web app
+    
+    Returns:
+        Dictionary with cleanup statistics
+    """
+    try:
+        # Get list of completed file IDs from backend
+        print("Requesting completed IDs from backend...")
+        r = requests.post(web_app_url, json={"action": "get_completed_ids"}, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        
+        print(f"Backend response: {data}")
+        
+        if not data.get("ok"):
+            error_msg = data.get("error", "Unknown error")
+            return {"ok": False, "message": f"Backend error: {error_msg}"}
+        
+        completed_ids = data.get("fileIds", [])
+        print(f"Found {len(completed_ids)} completed images to clean")
+        deleted_count = 0
+        
+        # Delete cache files for completed images
+        for file_id in completed_ids:
+            cache_path = _get_cache_path(file_id)
+            if cache_path.exists():
+                try:
+                    cache_path.unlink()
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"Failed to delete cache file {cache_path}: {e}")
+        
+        return {
+            "ok": True,
+            "completed_count": len(completed_ids),
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        print(f"Cache cleanup error: {e}")
+        return {"ok": False, "message": str(e)}
+
+
+def get_cache_stats() -> Dict[str, Any]:
+    """
+    Get statistics about the cache.
+    
+    Returns:
+        Dictionary with cache size and file count
+    """
+    try:
+        if not CACHE_DIR.exists():
+            return {"file_count": 0, "total_size_mb": 0}
+        
+        files = list(CACHE_DIR.glob("*.tif"))
+        total_size = sum(f.stat().st_size for f in files)
+        
+        return {
+            "file_count": len(files),
+            "total_size_mb": round(total_size / (1024 * 1024), 2)
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def prefetch_next_image(web_app_url: str = WEB_APP_URL) -> None:
