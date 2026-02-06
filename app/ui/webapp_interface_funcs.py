@@ -85,8 +85,8 @@ def fetch_next_image(web_app_url: str = WEB_APP_URL, user: Optional[str] = "anon
         rb = requests.get(raw_url, timeout=120)
         rb.raise_for_status()
         
-        # Decode base64 -> numpy via tifffile
-        b = base64.b64decode(rb.text)
+        # Decode base64 (Apps Script always returns base64 over HTTP)
+        b = base64.b64decode(rb.content)
         arr = tifffile.imread(io.BytesIO(b))
         
         return {

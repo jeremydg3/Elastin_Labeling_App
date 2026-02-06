@@ -223,6 +223,7 @@ function getLastTileIndexRow() {
       }
       row = r;
     }
+    lastTileIndex += 1
     return [lastTileIndex, row];
   } finally {
     lock.releaseLock();
@@ -380,10 +381,8 @@ function doGet(e) {
   if (e && e.parameter && e.parameter.raw) {
     const file = DriveApp.getFileById(e.parameter.raw);
     const blob = file.getBlob();
-    const b64 = Utilities.base64Encode(blob.getBytes());
-    return ContentService
-      .createTextOutput(b64)
-      .setMimeType(ContentService.MimeType.TEXT);
+    // Return the file blob directly as binary content
+    return blob.setContentType(blob.getContentType());
   }
 
   return HtmlService.createHtmlOutput("OK");

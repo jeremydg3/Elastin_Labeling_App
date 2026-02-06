@@ -17,4 +17,4 @@ clasp login
 clasp clone "1hdav6U6jvMI9FED5nrP3SULF4Mao7BQ0mVTeZw10Fk-AnScN4UgDiyd5" --rootDir src
 
 4) To push to google cloud
-clasp -P src/ push
+clasp -P app/webapp/ push
