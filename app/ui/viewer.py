@@ -207,8 +207,8 @@ class MainWindow(QWidget):
             self.status.setText(f"{self.image_title}  —  image: {img_w}x{img_h}  tiles: {rows}x{cols}")
             self._set_work_buttons_enabled(True)
             
-            # TODO: Start prefetching next image in background (requires backend "peek_next" action)
-            # self._start_prefetch()
+            # Start prefetching next image in background
+            self._start_prefetch()
 
         self._run_in_thread(_task_fetch, on_result=_on_result, on_error=self._show_error)
 
@@ -310,6 +310,11 @@ class MainWindow(QWidget):
 
 
     def closeEvent(self, event: QCloseEvent):
+        # Stop any running prefetch thread
+        if self._prefetch_thread and self._prefetch_thread.isRunning():
+            self._prefetch_thread.quit()
+            self._prefetch_thread.wait(1000)  # Wait up to 1 second
+        
         def _task_clean_exit():
             file_id = self.current["fileId"] if self.current else None
             clean_exit(self.web_app_url, file_id=file_id)
@@ -418,7 +423,8 @@ class MainWindow(QWidget):
         """Start prefetching the next image in the background."""
         # Cancel any existing prefetch
         if self._prefetch_thread and self._prefetch_thread.isRunning():
-            return  # Already prefetching
+            self._prefetch_thread.quit()
+            self._prefetch_thread.wait(500)  # Wait briefly for cleanup
         
         def _prefetch_task():
             prefetch_next_image(self.web_app_url)

@@ -444,32 +444,46 @@ def prefetch_next_image(web_app_url: str = WEB_APP_URL) -> None:
         web_app_url: URL of the Google Apps Script web app
     """
     try:
+        print("Starting prefetch...")
         # Peek at next image (get file ID without claiming)
         r = requests.post(web_app_url, json={"action": "peek_next"}, timeout=30)
         
+        print(f"Peek response status: {r.status_code}")
+        
         # If peek action doesn't exist in backend, silently skip prefetch
         if r.status_code != 200:
+            print(f"Peek endpoint not available (status {r.status_code}), skipping prefetch")
             return
             
         data = r.json()
-        if data.get("done") or not data.get("fileId"):
+        print(f"Peek response data: {data}")
+        
+        if data.get("done"):
+            print("Queue empty, no image to prefetch")
+            return
+            
+        if not data.get("fileId"):
+            print("No fileId in response")
             return
         
         file_id = data['fileId']
+        print(f"Peeked next image: {file_id}")
         
         # Check if already cached
         if _load_from_cache(file_id) is not None:
+            print(f"Image {file_id} already cached, skipping download")
             return  # Already cached
         
         # Download and cache
+        print(f"Downloading image {file_id} to cache...")
         raw_url = f"{web_app_url}?raw={file_id}"
         rb = requests.get(raw_url, timeout=180)
         rb.raise_for_status()
         
-        # Decode and cache
-        b = base64.b64decode(rb.content)
+        # Decode and cache (use rb.text for base64 string)
+        b = base64.b64decode(rb.text.strip())
         _save_to_cache(file_id, b)
-        print(f"Prefetched image {file_id} to cache")
+        print(f"✓ Prefetched image {file_id} to cache ({len(b)} bytes)")
         
     except Exception as e:
         # Silently fail - prefetch is optional optimization

@@ -116,6 +116,27 @@ function findNextRow_(data, staleMinutes) {
   return -1;
 }
 
+function peekNext_() {
+  // Peek at the next available image without claiming it
+  const lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+  try {
+    const sh = sheet_();
+    const rng = sh.getDataRange();
+    const data = rng.getValues();
+    
+    const rowIdx = findNextRow_(data, CFG.STALE_MINUTES);
+    if (rowIdx < 0) return { done: true, message: 'Queue empty.' };
+
+    const fileId = data[rowIdx][0];
+    const fileName = data[rowIdx][1];
+
+    return { done: false, fileId, fileName };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function popNext_(requester) {
   const lock = LockService.getScriptLock();
   lock.tryLock(30000);
@@ -398,6 +419,7 @@ function doPost(e) {
   }
 
   const me = (function () { try { return Session.getActiveUser().getEmail() || 'anonymous'; } catch (e) { return 'anonymous'; } })();
+  if (req.action === 'peek_next') return json_(peekNext_());
   if (req.action === 'next') return json_(popNext_(req.user || me));
   if (req.action === 'done' && req.fileId) return json_(markDone_(req.fileId, me));
   if (req.action === 'skip' && req.fileId) return json_(skip_(req.fileId, me));
@@ -406,7 +428,7 @@ function doPost(e) {
   if (req.action === 'create_user' && req.name) return json_(createNewUser(req.name));
   if (req.action === 'clean_exit' && req.fileId) return json_(clean_exit(req.fileId, me));
   if (req.action === 'get_completed_ids') return json_(getCompletedFileIds());
-  return json_({ error: 'Unknown action: ' + req.action + '.' });
+  return json_({ error: 'Unknown action: ' + req.action });
 }
 
 function json_(obj) {
