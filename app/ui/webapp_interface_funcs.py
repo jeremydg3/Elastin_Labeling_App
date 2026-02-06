@@ -436,13 +436,22 @@ def _get_progress_mask_path(file_id: str) -> Path:
     return CACHE_DIR / f"{file_id}_mask.csv"
 
 
-def save_progress_mask(file_id: str, full_mask: np.ndarray) -> bool:
+def save_progress_mask(file_id: str, full_mask: np.ndarray, tile_completion: Dict[int, bool] = None,
+                       tile_working: set = None, tile_size: int = 256, layout: tuple = (0, 0)) -> bool:
     """
     Save the full image mask as a CSV file in the cache folder.
+    Uses decimal encoding to track tile completion status:
+    - Base value (0-9, 255): mask group/empty
+    - +0.1: tile marked as work in progress
+    - +0.2: tile marked as complete
     
     Args:
         file_id: The file ID of the image
         full_mask: Full image mask array (H, W) with values 0..9 or 255
+        tile_completion: Dict mapping tile index to completion status (True=complete)
+        tile_working: Set of tile indices marked as work in progress
+        tile_size: Size of tiles (default 256)
+        layout: Tile layout (rows, cols)
     
     Returns:
         True if successful, False otherwise
@@ -450,10 +459,43 @@ def save_progress_mask(file_id: str, full_mask: np.ndarray) -> bool:
     try:
         mask_path = _get_progress_mask_path(file_id)
         
-        # Save as CSV
+        # Convert to float for decimal encoding
+        float_mask = full_mask.astype(np.float32)
+        
+        if layout[0] > 0 and layout[1] > 0:
+            rows, cols = layout
+            
+            # Add 0.1 to pixels in working tiles
+            if tile_working:
+                for tile_idx in tile_working:
+                    r = tile_idx // cols
+                    c = tile_idx % cols
+                    
+                    y0 = r * tile_size
+                    x0 = c * tile_size
+                    y1 = min(y0 + tile_size, full_mask.shape[0])
+                    x1 = min(x0 + tile_size, full_mask.shape[1])
+                    
+                    float_mask[y0:y1, x0:x1] += 0.1
+            
+            # Add 0.2 to pixels in completed tiles
+            if tile_completion:
+                for tile_idx, is_complete in tile_completion.items():
+                    if is_complete:
+                        r = tile_idx // cols
+                        c = tile_idx % cols
+                        
+                        y0 = r * tile_size
+                        x0 = c * tile_size
+                        y1 = min(y0 + tile_size, full_mask.shape[0])
+                        x1 = min(x0 + tile_size, full_mask.shape[1])
+                        
+                        float_mask[y0:y1, x0:x1] += 0.2
+        
+        # Save as CSV with float values
         with open(mask_path, 'w', newline='') as f:
             writer = csv.writer(f)
-            for row in full_mask:
+            for row in float_mask:
                 writer.writerow(row)
         
         print(f"Saved progress mask to {mask_path}")
@@ -463,15 +505,19 @@ def save_progress_mask(file_id: str, full_mask: np.ndarray) -> bool:
         return False
 
 
-def load_progress_mask(file_id: str) -> Optional[np.ndarray]:
+def load_progress_mask(file_id: str, tile_size: int = 256) -> Optional[Dict[str, Any]]:
     """
     Load the full image mask from a CSV file in the cache folder.
+    Decodes tile completion status from decimal values:
+    - +0.1: tile marked as work in progress
+    - +0.2: tile marked as complete
     
     Args:
         file_id: The file ID of the image
+        tile_size: Size of tiles (default 256)
     
     Returns:
-        Full image mask array (H, W) or None if not found
+        Dictionary with 'mask' (H, W), 'completed_tiles' (set), and 'working_tiles' (set), or None if not found
     """
     try:
         mask_path = _get_progress_mask_path(file_id)
@@ -479,16 +525,51 @@ def load_progress_mask(file_id: str) -> Optional[np.ndarray]:
         if not mask_path.exists():
             return None
         
-        # Load from CSV
+        # Load from CSV as floats
         with open(mask_path, 'r') as f:
             reader = csv.reader(f)
             rows = []
             for row in reader:
-                rows.append([int(val) for val in row])
+                rows.append([float(val) for val in row])
         
-        mask = np.array(rows, dtype=np.uint8)
-        print(f"Loaded progress mask from {mask_path}, shape: {mask.shape}")
-        return mask
+        float_mask = np.array(rows, dtype=np.float32)
+        
+        # Extract base mask (integer part)
+        base_mask = np.floor(float_mask).astype(np.uint8)
+        
+        # Extract decimal part to determine tile status
+        decimal_part = float_mask - base_mask
+        
+        # Find completed and working tiles
+        completed_tiles = set()
+        working_tiles = set()
+        rows = (float_mask.shape[0] + tile_size - 1) // tile_size
+        cols = (float_mask.shape[1] + tile_size - 1) // tile_size
+        
+        for r in range(rows):
+            for c in range(cols):
+                tile_idx = r * cols + c
+                
+                y0 = r * tile_size
+                x0 = c * tile_size
+                y1 = min(y0 + tile_size, float_mask.shape[0])
+                x1 = min(x0 + tile_size, float_mask.shape[1])
+                
+                tile_decimals = decimal_part[y0:y1, x0:x1]
+                
+                # Check if this tile is marked complete (decimal ~= 0.2)
+                if np.any((tile_decimals > 0.15) & (tile_decimals < 0.25)):
+                    completed_tiles.add(tile_idx)
+                # Check if this tile is marked working (decimal ~= 0.1)
+                elif np.any((tile_decimals > 0.05) & (tile_decimals < 0.15)):
+                    working_tiles.add(tile_idx)
+        
+        print(f"Loaded progress mask from {mask_path}, shape: {base_mask.shape}, {len(completed_tiles)} completed tiles, {len(working_tiles)} working tiles")
+        return {
+            'mask': base_mask,
+            'completed_tiles': completed_tiles,
+            'working_tiles': working_tiles
+        }
     except Exception as e:
         print(f"Failed to load progress mask: {e}")
         return None

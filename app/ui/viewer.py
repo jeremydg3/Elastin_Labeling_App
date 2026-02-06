@@ -188,10 +188,14 @@ class MainWindow(QWidget):
             file_name = result["fileName"]
             
             # Check if we have the cached image and mask
-            mask = load_progress_mask(file_id)
-            if mask is None:
+            mask_data = load_progress_mask(file_id, self.tile_size)
+            if mask_data is None:
                 print(f"In-progress work found but no cached mask for {file_id}")
                 return
+            
+            full_mask = mask_data['mask']
+            completed_tiles = mask_data['completed_tiles']
+            working_tiles = mask_data['working_tiles']
             
             # Ask user if they want to resume
             reply = QMessageBox.question(
@@ -202,13 +206,13 @@ class MainWindow(QWidget):
             )
             
             if reply == QMessageBox.StandardButton.Yes:
-                self._resume_progress(file_id, file_name, mask)
+                self._resume_progress(file_id, file_name, full_mask, completed_tiles, working_tiles)
             
         except Exception as e:
             print(f"Error checking for in-progress work: {e}")
 
 
-    def _resume_progress(self, file_id: str, file_name: str, full_mask: np.ndarray):
+    def _resume_progress(self, file_id: str, file_name: str, full_mask: np.ndarray, completed_tiles: set, working_tiles: set):
         """Resume work on an in-progress image."""
         try:
             self._busy(True, "Resuming progress...")
@@ -245,7 +249,9 @@ class MainWindow(QWidget):
                     "tiles": tiles_np,
                     "enabled": enabled_flags,
                     "layout": (rows, cols),
-                    "tile_masks": tile_masks
+                    "tile_masks": tile_masks,
+                    "completed_tiles": completed_tiles,
+                    "working_tiles": working_tiles
                 }
             
             def _on_resume_result(res: dict):
@@ -261,13 +267,42 @@ class MainWindow(QWidget):
                 self.view.set_title(self.image_title)
                 self.tiles_np = res["tiles"]
                 
-                # Set tiles
+                # Get tile layout info
                 rows, cols = res["layout"]
                 img_h, img_w = res["img_shape"][0], res["img_shape"][1]
-                self.view.set_tiles_with_flags(self.tiles_np, res["enabled"], (rows, cols))
                 
-                # Restore masks
+                # Restore completed and working tiles
+                completed_tiles = res["completed_tiles"]
+                working_tiles = res["working_tiles"]
+                print(f"DEBUG: Restoring {len(completed_tiles)} completed tiles: {completed_tiles}")
+                print(f"DEBUG: Restoring {len(working_tiles)} working tiles: {working_tiles}")
+                
+                # Set tiles and restore state manually
+                from utils import np_to_qpixmap
+                self.view.tiles_pix = [np_to_qpixmap(t) for t in self.tiles_np]
+                self.view.enabled = res["enabled"][:]
+                self.view._rows, self.view._cols = rows, cols
+                
+                # Restore masks, completed, and working state BEFORE populating grid
                 self.view._masks = res["tile_masks"]
+                self.view._completed = completed_tiles
+                self.view._working = working_tiles
+                
+                print(f"DEBUG: Before populate_fixed, _completed = {self.view._completed}, _working = {self.view._working}")
+                
+                # Populate grid with completed and working tiles
+                if hasattr(self.view.grid, 'populate_fixed') and self.view.grid.populate_fixed.__code__.co_argcount >= 7:
+                    self.view.grid.populate_fixed(self.view.tiles_pix, self.view.enabled, rows, cols, 
+                                                  completed=self.view._completed, working=self.view._working)
+                else:
+                    self.view.grid.populate_fixed(self.view.tiles_pix, self.view.enabled, rows, cols, 
+                                                  completed=self.view._completed)
+                
+                self.view._show_grid()
+                
+                print(f"DEBUG: After _show_grid, _completed = {self.view._completed}, _working = {self.view._working}")
+                print(f"DEBUG: Grid widget completed state: {getattr(self.view.grid, '_completed', 'N/A')}")
+                print(f"DEBUG: Grid widget working state: {getattr(self.view.grid, '_working', 'N/A')}")
                 
                 self.status.setText(f"{self.image_title}  —  image: {img_w}x{img_h}  tiles: {rows}x{cols} (RESUMED)")
                 self._set_work_buttons_enabled(True)
@@ -468,8 +503,20 @@ class MainWindow(QWidget):
             return
         file_id = self.current["fileId"]
         mark_image_done(self.web_app_url, file_id)
-        # Delete progress mask since work is complete
+        
+        # Delete progress mask and cached image since work is complete
         delete_progress_mask(file_id)
+        
+        # Also delete the cached image file
+        from webapp_interface_funcs import _get_cache_path
+        cache_path = _get_cache_path(file_id)
+        if cache_path.exists():
+            try:
+                cache_path.unlink()
+                print(f"Deleted cached image: {cache_path}")
+            except Exception as e:
+                print(f"Failed to delete cached image: {e}")
+        
         self.current = None
         self._set_work_buttons_enabled(False)
 
@@ -819,8 +866,12 @@ class MainWindow(QWidget):
         
         full_mask = self._stitch_masks_to_full_image(tile_masks, img_shape, layout)
         
-        # Save to cache
-        if save_progress_mask(file_id, full_mask):
+        # Get tile completion status and working status
+        completed_tiles_dict = {idx: True for idx in self.view.get_completed_indices()}
+        working_tiles_set = self.view._working
+        
+        # Save to cache with completion and working status encoded as decimals
+        if save_progress_mask(file_id, full_mask, completed_tiles_dict, working_tiles_set, self.tile_size, layout):
             # Mark as in_progress on backend
             mark_image_in_progress(self.web_app_url, file_id, self.user)
             print(f"Auto-saved progress for {file_id}")
