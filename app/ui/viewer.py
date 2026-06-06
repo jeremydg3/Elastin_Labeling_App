@@ -10,11 +10,12 @@ from typing import List, Any, Callable, Optional
 
 from PyQt6.QtGui import QCloseEvent, QIcon
 from PyQt6.QtCore import pyqtSignal, Qt, QObject, QCoreApplication, QThread, pyqtSlot
-from PyQt6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QApplication, QInputDialog
+from PyQt6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QApplication
 
 from tile_browser import TileBrowser
 from loading_animation import LoadingDialog
 from user_selection_dialog import show_user_selection_dialog
+from in_progress_selection_dialog import show_in_progress_selection_dialog
 from webapp_interface_funcs import (
     WEB_APP_URL,
     fetch_next_image,
@@ -32,6 +33,7 @@ from webapp_interface_funcs import (
     mark_image_in_progress,
     get_in_progress_image
 )
+from utils import np_to_qpixmap
 from styles import apply_dark_theme
 
 basedir = os.path.dirname(__file__)
@@ -194,10 +196,35 @@ class MainWindow(QWidget):
                 if mask_data is None:
                     continue
 
+                # Build summary stats for selection dialog
+                mask_h, mask_w = mask_data["mask"].shape
+                rows = (mask_h + self.tile_size - 1) // self.tile_size
+                cols = (mask_w + self.tile_size - 1) // self.tile_size
+                total_tiles = rows * cols if rows > 0 and cols > 0 else 0
+                complete_count = len(mask_data["completed_tiles"])
+                working_count = len(mask_data["working_tiles"])
+
+                if total_tiles > 0:
+                    complete_pct = int(round((complete_count / total_tiles) * 100.0))
+                    working_pct = int(round((working_count / total_tiles) * 100.0))
+                else:
+                    complete_pct = 0
+                    working_pct = 0
+
+                # Clamp to keep stacked bar visually sane
+                complete_pct = max(0, min(100, complete_pct))
+                working_pct = max(0, min(100 - complete_pct, working_pct))
+
+                preview = self._get_cached_preview_pixmap(file_id)
+
                 local_matches.append({
                     "file_id": file_id,
                     "file_name": file_name,
-                    "mask_data": mask_data
+                    "mask_data": mask_data,
+                    "preview": preview,
+                    "total_tiles": total_tiles,
+                    "complete_pct": complete_pct,
+                    "working_pct": working_pct,
                 })
 
             # If backend has in-progress work but none exist in this machine's cache,
@@ -210,18 +237,9 @@ class MainWindow(QWidget):
             if len(local_matches) == 1:
                 selected = local_matches[0]
             else:
-                labels = [f"{m['file_name']} ({m['file_id']})" for m in local_matches]
-                selection, ok = QInputDialog.getItem(
-                    self,
-                    "Resume Progress",
-                    "Multiple locally saved images found. Select one to resume:",
-                    labels,
-                    0,
-                    False
-                )
-                if not ok:
+                selected = show_in_progress_selection_dialog(local_matches, self)
+                if selected is None:
                     return
-                selected = local_matches[labels.index(selection)]
 
             mask_data = selected["mask_data"]
             self._resume_progress(
@@ -234,6 +252,32 @@ class MainWindow(QWidget):
             
         except Exception as e:
             print(f"Error checking for in-progress work: {e}")
+
+
+    def _get_cached_preview_pixmap(self, file_id: str, max_side: int = 170):
+        """Load cached TIFF and generate a small preview pixmap for dialogs."""
+        try:
+            from webapp_interface_funcs import _load_from_cache
+
+            cached_bytes = _load_from_cache(file_id)
+            if not cached_bytes:
+                return None
+
+            img_array = tifffile.imread(io.BytesIO(cached_bytes))
+            img_rgb = self._to_rgb_uint8(img_array)
+
+            h, w = img_rgb.shape[:2]
+            if h <= 0 or w <= 0:
+                return None
+
+            scale = min(max_side / float(w), max_side / float(h), 1.0)
+            out_w = max(1, int(round(w * scale)))
+            out_h = max(1, int(round(h * scale)))
+            thumb = cv2.resize(img_rgb, (out_w, out_h), interpolation=cv2.INTER_AREA)
+            return np_to_qpixmap(thumb)
+        except Exception as e:
+            print(f"Failed to generate preview for {file_id}: {e}")
+            return None
 
 
     def _resume_progress(self, file_id: str, file_name: str, full_mask: np.ndarray, completed_tiles: set, working_tiles: set):
