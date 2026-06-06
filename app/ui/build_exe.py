@@ -11,6 +11,10 @@ ui_dir = project_root / "ui"
 viewer_script = ui_dir / "viewer.py"
 icon_path = assets_dir / "logo.png"
 
+# One-file executables are more likely to be quarantined by AV heuristics.
+# Keep default build in one-dir mode for reliability on Windows.
+USE_ONEFILE = False
+
 # Build list of assets to include
 asset_files = [
     (str(assets_dir / "logo.png"), "assets"),
@@ -23,14 +27,21 @@ asset_files = [
 args = [
     str(viewer_script),
     "--name=ElastinQueueViewer",
-    "--onefile",
     "--windowed",  # No console window (same as --noconsole)
     f"--icon={icon_path}",
 ]
 
+if USE_ONEFILE:
+    args.append("--onefile")
+else:
+    args.append("--onedir")
+
 # Add all asset files
 for src, dest in asset_files:
     args.extend(["--add-data", f"{src};{dest}"])
+# TODO: Add support for Mac
+# for src, dest in asset_files:
+#     args.extend(["--add-data", f"{src};{dest}"])
 
 # Add hidden imports
 hidden_imports = [
@@ -54,6 +65,7 @@ for module in hidden_imports:
 args.extend([
     "--noconfirm",  # Overwrite output directory without asking
     "--clean",      # Clean PyInstaller cache before building
+    "--noupx",      # Reduces AV false positives on Windows
 ])
 
 # Ensure imagecodecs compiled extensions and data are collected (needed for lzw_decode, etc.)
