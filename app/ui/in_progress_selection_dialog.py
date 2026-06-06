@@ -112,15 +112,17 @@ class InProgressRowWidget(QFrame):
 
         complete_pct = item.get("complete_pct", 0)
         working_pct = item.get("working_pct", 0)
+        complete_count = item.get("complete_count", 0)
+        working_count = item.get("working_count", 0)
 
         bar = StackedProgressBar(complete_pct, working_pct)
         bar.setMinimumWidth(560)
         bar.setMaximumHeight(38)
 
-        lbl_complete = QLabel(f"{complete_pct}% complete")
+        lbl_complete = QLabel(f"{complete_pct}% complete ({complete_count})")
         lbl_complete.setStyleSheet("QLabel { color: #06d778; font-size: 20px; }")
 
-        lbl_working = QLabel(f"{working_pct}% working")
+        lbl_working = QLabel(f"{working_pct}% working ({working_count})")
         lbl_working.setStyleSheet("QLabel { color: #ff8a3d; font-size: 20px; }")
 
         right.addLayout(top)

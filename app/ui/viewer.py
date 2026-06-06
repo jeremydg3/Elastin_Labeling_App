@@ -223,6 +223,8 @@ class MainWindow(QWidget):
                     "mask_data": mask_data,
                     "preview": preview,
                     "total_tiles": total_tiles,
+                    "complete_count": complete_count,
+                    "working_count": working_count,
                     "complete_pct": complete_pct,
                     "working_pct": working_pct,
                 })
