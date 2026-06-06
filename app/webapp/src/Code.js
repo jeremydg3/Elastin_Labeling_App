@@ -236,12 +236,15 @@ function markInProgress_(fileId, requester) {
 }
 
 function getInProgress_(requester) {
-  // Get the in_progress image for a specific user
+  // Get all in_progress images for a specific user.
+  // Returning all rows prevents cross-device ordering issues when only
+  // some in-progress masks are available in a local cache.
   const lock = LockService.getScriptLock();
   lock.tryLock(30000);
   try {
     const sh = sheet_();
     const data = sh.getDataRange().getValues();
+    const inProgressItems = [];
     
     for (let r = 1; r < data.length; r++) {
       const status = data[r][2];
@@ -250,14 +253,45 @@ function getInProgress_(requester) {
       if (status === 'in_progress' && claimedBy === requester) {
         const fileId = data[r][0];
         const fileName = data[r][1];
-        return { ok: true, fileId, fileName };
+        inProgressItems.push({ fileId, fileName });
       }
     }
-    
-    return { ok: false, message: 'No in_progress work found.' };
+
+    // Keep legacy fields when there is exactly one item for older clients.
+    if (inProgressItems.length === 1) {
+      return {
+        ok: true,
+        fileId: inProgressItems[0].fileId,
+        fileName: inProgressItems[0].fileName,
+        inProgressItems
+      };
+    }
+
+    return {
+      ok: true,
+      inProgressItems,
+      message: inProgressItems.length ? '' : 'No in_progress work found.'
+    };
   } finally {
     lock.releaseLock();
   }
+}
+
+function testGetInProgressForUser(user) {
+  const targetUser = user || email_();
+  const result = getInProgress_(targetUser);
+  const items = result.inProgressItems || [];
+
+  Logger.log('testGetInProgressForUser: user=' + targetUser + ', count=' + items.length);
+  if (items.length === 0) {
+    Logger.log('No in_progress images found for user: ' + targetUser);
+  } else {
+    for (let i = 0; i < items.length; i++) {
+      Logger.log('[' + (i + 1) + '] fileId=' + items[i].fileId + ', fileName=' + items[i].fileName);
+    }
+  }
+
+  return result;
 }
 
 function skip_(fileId, requester) {

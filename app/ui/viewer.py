@@ -10,7 +10,7 @@ from typing import List, Any, Callable, Optional
 
 from PyQt6.QtGui import QCloseEvent, QIcon
 from PyQt6.QtCore import pyqtSignal, Qt, QObject, QCoreApplication, QThread, pyqtSlot
-from PyQt6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QApplication
+from PyQt6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QApplication, QInputDialog
 
 from tile_browser import TileBrowser
 from loading_animation import LoadingDialog
@@ -175,38 +175,62 @@ class MainWindow(QWidget):
 
 
     def _check_and_resume_progress(self):
-        """Check if user has in-progress work and offer to resume."""
+        """Check if user has in-progress work and resume local matches."""
         try:
-            # Query backend for in_progress work
+            # Query backend for all in_progress work for this user
             result = get_in_progress_image(self.web_app_url, self.user)
-            
-            if not result.get("ok"):
-                # No in-progress work found
+
+            items = result.get("items", [])
+            if not items:
                 return
-            
-            file_id = result["fileId"]
-            file_name = result["fileName"]
-            
-            # Check if we have the cached image and mask
-            mask_data = load_progress_mask(file_id, self.tile_size)
-            if mask_data is None:
-                print(f"In-progress work found but no cached mask for {file_id}")
+
+            local_matches = []
+            for item in items:
+                file_id = item.get("fileId")
+                if not file_id:
+                    continue
+                file_name = item.get("fileName", file_id)
+                mask_data = load_progress_mask(file_id, self.tile_size)
+                if mask_data is None:
+                    continue
+
+                local_matches.append({
+                    "file_id": file_id,
+                    "file_name": file_name,
+                    "mask_data": mask_data
+                })
+
+            # If backend has in-progress work but none exist in this machine's cache,
+            # automatically continue with the next available queue image.
+            if not local_matches:
+                print("In-progress work found on backend, but no local cached progress matches.")
+                self.on_next()
                 return
-            
-            full_mask = mask_data['mask']
-            completed_tiles = mask_data['completed_tiles']
-            working_tiles = mask_data['working_tiles']
-            
-            # Ask user if they want to resume
-            reply = QMessageBox.question(
-                self,
-                "Resume Progress",
-                f"You have in-progress work on:\n{file_name}\n\nWould you like to resume?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+
+            if len(local_matches) == 1:
+                selected = local_matches[0]
+            else:
+                labels = [f"{m['file_name']} ({m['file_id']})" for m in local_matches]
+                selection, ok = QInputDialog.getItem(
+                    self,
+                    "Resume Progress",
+                    "Multiple locally saved images found. Select one to resume:",
+                    labels,
+                    0,
+                    False
+                )
+                if not ok:
+                    return
+                selected = local_matches[labels.index(selection)]
+
+            mask_data = selected["mask_data"]
+            self._resume_progress(
+                selected["file_id"],
+                selected["file_name"],
+                mask_data['mask'],
+                mask_data['completed_tiles'],
+                mask_data['working_tiles']
             )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                self._resume_progress(file_id, file_name, full_mask, completed_tiles, working_tiles)
             
         except Exception as e:
             print(f"Error checking for in-progress work: {e}")

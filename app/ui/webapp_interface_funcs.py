@@ -16,7 +16,7 @@ import hashlib
 import time
 
 
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyk9LTgILaUTa-HlSMnz9Ads9neY-lf8Y-giVduiIL7k5Q5mWYKmHtsZreUgPU9TT3aUw/exec"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzjBlgDkvDQmdTkY0yk5nc8VWw-5GD-JDPjCsbhvJ7fkEtW3k9eZKPMDM6zzb-Pm89GJA/exec"
 MAX_ATTEMPTS = 3
 CACHE_DIR = Path("cache")
 CACHE_DIR.mkdir(exist_ok=True)
@@ -626,14 +626,39 @@ def get_in_progress_image(web_app_url: str, user: str) -> dict:
         user: The username
     
     Returns:
-        Response dictionary with fileId and fileName if found
+        Normalized response dictionary:
+            {
+                "ok": bool,
+                "items": [{"fileId": str, "fileName": str}, ...],
+                "message": str
+            }
     """
     try:
         r = requests.post(web_app_url, json={"action": "get_in_progress", "user": user}, timeout=30)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+
+        # New backend shape: {ok, inProgressItems: [{fileId, fileName}, ...]}
+        raw_items = data.get("inProgressItems")
+        if isinstance(raw_items, list):
+            items = [
+                {"fileId": it.get("fileId"), "fileName": it.get("fileName", it.get("fileId", ""))}
+                for it in raw_items
+                if isinstance(it, dict) and it.get("fileId")
+            ]
+        # Legacy backend shape: {ok, fileId, fileName}
+        elif data.get("fileId"):
+            items = [{"fileId": data.get("fileId"), "fileName": data.get("fileName", data.get("fileId", ""))}]
+        else:
+            items = []
+
+        return {
+            "ok": bool(data.get("ok")) or bool(items),
+            "items": items,
+            "message": data.get("message", "")
+        }
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "items": [], "error": str(e)}
 
 
 def prefetch_next_image(web_app_url: str = WEB_APP_URL) -> None:
