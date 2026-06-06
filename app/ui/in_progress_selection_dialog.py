@@ -65,8 +65,10 @@ class InProgressRowWidget(QFrame):
     def __init__(self, item: Dict[str, Any], parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.item = item
+        self._hovered = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("QFrame { background-color: transparent; border: none; }")
+        self.setMouseTracking(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
 
         root = QHBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -129,6 +131,46 @@ class InProgressRowWidget(QFrame):
 
         root.addWidget(thumb_label)
         root.addLayout(right, 1)
+
+        # Treat the whole row as one interactive target so hover/click
+        # highlighting applies uniformly instead of per-child widgets.
+        self._make_children_mouse_transparent()
+
+    def _make_children_mouse_transparent(self):
+        for child in self.findChildren(QWidget):
+            if child is self:
+                continue
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def _set_hovered(self, hovered: bool):
+        if self._hovered != hovered:
+            self._hovered = hovered
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        if self._hovered:
+            painter.fillRect(rect, QColor(255, 255, 255, 22))
+            pen = QPen(QColor("#4d9eff"))
+            pen.setWidth(1)
+        else:
+            pen = QPen(QColor(0, 0, 0, 0))
+            pen.setWidth(1)
+
+        painter.setPen(pen)
+        painter.drawRoundedRect(rect, 6, 6)
+        super().paintEvent(event)
+
+    def enterEvent(self, event):
+        self._set_hovered(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._set_hovered(False)
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
